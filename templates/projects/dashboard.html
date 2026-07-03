@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Dashboard{% endblock %}
+{% block meta_description %}Your projects.{% endblock %}
+
+{% block content %}
+<h1>Projects</h1>
+<p><a class="btn btn-primary" href="{% url 'projects:create' %}">New Project</a></p>
+
+{% if projects %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Client</th>
+            <th>Status</th>
+            <th>Created</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for project in projects %}
+        <tr>
+            <td><a href="{% url 'projects:detail' project.pk %}">{{ project.name }}</a></td>
+            <td>{{ project.client }}</td>
+            <td>{{ project.get_status_display }}</td>
+            <td>{{ project.created_at|date:'M j, Y' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No projects yet.</p>
+{% endif %}
+{% endblock %}

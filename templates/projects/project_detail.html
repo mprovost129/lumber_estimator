@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ project.name }}{% endblock %}
+{% block meta_description %}{{ project.name }} project workspace.{% endblock %}
+
+{% block content %}
+<h1>{{ project.name }}</h1>
+<p>{{ project.client }}</p>
+
+<h2>Plans</h2>
+<form method="post" enctype="multipart/form-data" action="{% url 'plans:upload' project.pk %}">
+    {% csrf_token %}
+    <input type="file" name="original_file" accept="application/pdf" required>
+    <button type="submit" class="btn btn-secondary">Upload Plan (PDF)</button>
+</form>
+
+{% for plan in project.plans.all %}
+<h3 class="mt-4">{{ plan.name }}</h3>
+<div class="d-flex flex-wrap gap-3">
+    {% for page in plan.pages.all %}
+    <div class="text-center">
+        <a href="{% url 'plans:viewer' page.pk %}">
+            <img src="{{ page.thumbnail.url }}" alt="{{ page.display_label }}" style="max-width: 150px;">
+        </a>
+        <form method="post" action="{% url 'plans:page-label' page.pk %}" class="mt-1">
+            {% csrf_token %}
+            <input type="text" name="label" value="{{ page.label }}" placeholder="Page {{ page.page_number }}" size="15">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% empty %}
+<p>No plans uploaded yet.</p>
+{% endfor %}
+{% endblock %}

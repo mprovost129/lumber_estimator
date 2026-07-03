@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ page.display_label }} - {{ project.name }}{% endblock %}
+{% block meta_description %}Trace {{ page.display_label }}.{% endblock %}
+
+{% block extra_css %}
+<style>
+    #plan-viewer { display: flex; gap: 1rem; align-items: flex-start; }
+    #tool-sidebar { width: 56px; display: flex; flex-direction: column; gap: 0.5rem; flex-shrink: 0; }
+    #tool-sidebar .tool-btn {
+        width: 44px; height: 44px; padding: 0; font-size: 1.25rem;
+        display: flex; align-items: center; justify-content: center;
+    }
+    #plan-canvas-wrap { border: 1px solid #ccc; overflow: auto; max-width: 65vw; max-height: 80vh; }
+    #tool-panel { min-width: 260px; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<h1>{{ page.display_label }}</h1>
+<p><a href="{% url 'projects:detail' project.pk %}">&larr; Back to {{ project.name }}</a></p>
+
+<div id="plan-viewer"
+     data-image-url="{{ page.image.url }}"
+     data-trace-create-url="{% url 'plans:trace-create' page.pk %}"
+     data-trace-update-url-base="{% url 'plans:trace-update' 0 %}"
+     data-trace-delete-url-base="{% url 'plans:trace-delete' 0 %}"
+     data-presets-url="{% url 'plans:presets' %}"
+     data-default-stud-spacing="{{ default_stud_spacing_in }}">
+
+    <div id="tool-sidebar">
+        <button type="button" class="tool-btn btn btn-outline-primary" id="tool-line" data-tool="line" title="Line (Wall)">
+            <i class="bi bi-bricks"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-danger" id="delete-selected" title="Delete Selected">
+            <i class="bi bi-trash"></i>
+        </button>
+    </div>
+
+    <div id="plan-canvas-wrap">
+        <canvas id="plan-canvas"></canvas>
+    </div>
+
+    <div id="tool-panel">
+        <div id="no-selection-panel">
+            <p class="text-muted">Select a tool on the left to draw, or click an existing wall to view/edit it.</p>
+        </div>
+
+        <div id="tool-settings-panel" style="display: none;">
+            <h2 class="h5">Line Tool Settings</h2>
+            <p class="text-muted small">Applied to the next line you draw.</p>
+            <div class="mb-2">
+                <label for="material-select" class="form-label">Material</label>
+                <select id="material-select" class="form-select">
+                    {% include 'plans/_material_options.html' %}
+                </select>
+            </div>
+            <div class="mb-2">
+                <label for="stud-spacing-input" class="form-label">Stud spacing (in, OC)</label>
+                <input type="number" id="stud-spacing-input" class="form-control" value="{{ default_stud_spacing_in }}">
+            </div>
+
+            <h2 class="h5 mt-3">Presets</h2>
+            <div class="mb-2">
+                <select id="preset-select" class="form-select">
+                    <option value="">-- load a preset --</option>
+                    {% for preset in presets %}
+                    <option value="{{ preset.id }}">{{ preset.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="input-group mb-2">
+                <input type="text" id="preset-name-input" class="form-control" placeholder="Preset name">
+                <button type="button" class="btn btn-secondary" id="save-preset">Save as preset</button>
+            </div>
+        </div>
+
+        <div id="trace-inspector-panel" style="display: none;">
+            <h2 class="h5">Selected Wall</h2>
+            <div class="mb-2">
+                <label for="inspector-material-select" class="form-label">Material</label>
+                <select id="inspector-material-select" class="form-select">
+                    {% include 'plans/_material_options.html' %}
+                </select>
+            </div>
+            <div class="mb-2">
+                <label for="inspector-stud-spacing-input" class="form-label">Stud spacing (in, OC)</label>
+                <input type="number" id="inspector-stud-spacing-input" class="form-control">
+            </div>
+            <button type="button" class="btn btn-primary" id="save-trace-changes">Save changes</button>
+            <button type="button" class="btn btn-outline-danger" id="delete-inspected-trace">Delete</button>
+        </div>
+    </div>
+</div>
+
+{{ traces|json_script:"traces-data" }}
+{{ presets_data|json_script:"presets-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+<script src="{% static 'plans/viewer.js' %}"></script>
+{% endblock %}
