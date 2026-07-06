@@ -343,6 +343,8 @@ h1 { letter-spacing: -0.02em; }
 
 .badge-status-active { background: var(--success-soft); color: #15803d; font-weight: 600; }
 .badge-status-archived { background: #eef1f5; color: var(--text-muted); font-weight: 600; }
+.badge-status-warning { background: #fef6e7; color: #9a5b03; font-weight: 600; }
+.badge-status-info { background: var(--primary-soft); color: var(--primary-700); font-weight: 600; }
 
 /* =============================================================================
    Tags / pills

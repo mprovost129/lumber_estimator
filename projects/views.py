@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views import View
@@ -7,6 +8,38 @@ from django.views.generic import CreateView, DeleteView, DetailView, FormView, L
 
 from .forms import JobSettingsForm, ProjectSetupForm, ProjectTemplateForm
 from .models import JobSettings, Project, ProjectTemplate
+
+
+def _project_workflow_state(project):
+    if not project.has_pages:
+        return {
+            'label': 'No plans uploaded',
+            'tone': 'archived',
+            'hint': 'Upload a PDF or image to start this takeoff.',
+        }
+    if project.has_uncalibrated_pages:
+        return {
+            'label': 'Needs calibration',
+            'tone': 'warning',
+            'hint': 'Open the plan and set the page scale before assigning assemblies.',
+        }
+    if project.has_line_items:
+        return {
+            'label': 'Estimate ready',
+            'tone': 'active',
+            'hint': 'Material quantities have been generated for this job.',
+        }
+    if project.has_traces:
+        return {
+            'label': 'Tracing in progress',
+            'tone': 'info',
+            'hint': 'Continue tracing to finish the material list.',
+        }
+    return {
+        'label': 'Ready to trace',
+        'tone': 'info',
+        'hint': 'Plans are uploaded and calibrated. Start drawing takeoff items.',
+    }
 
 
 class StartTakeoffView(LoginRequiredMixin, View):
@@ -47,8 +80,18 @@ class DashboardView(LoginRequiredMixin, ListView):
     context_object_name = 'projects'
 
     def get_queryset(self):
+        from estimating.models import LineItem
+        from plans.models import PlanPage, Trace
+
         return Project.objects.for_account(self.request.user.account).exclude(
             status=Project.Status.ARCHIVED,
+        ).annotate(
+            has_pages=Exists(PlanPage.objects.filter(plan__project=OuterRef('pk'))),
+            has_uncalibrated_pages=Exists(
+                PlanPage.objects.filter(plan__project=OuterRef('pk'), scale_pixels_per_foot__isnull=True)
+            ),
+            has_traces=Exists(Trace.objects.filter(plan_page__plan__project=OuterRef('pk'))),
+            has_line_items=Exists(LineItem.objects.filter(estimate__project=OuterRef('pk'))),
         )
 
     def get_context_data(self, **kwargs):
@@ -57,6 +100,11 @@ class DashboardView(LoginRequiredMixin, ListView):
         context['active_count'] = all_projects.filter(status=Project.Status.ACTIVE).count()
         context['archived_count'] = all_projects.filter(status=Project.Status.ARCHIVED).count()
         context['total_count'] = all_projects.count()
+        for project in context['projects']:
+            workflow = _project_workflow_state(project)
+            project.workflow_label = workflow['label']
+            project.workflow_tone = workflow['tone']
+            project.workflow_hint = workflow['hint']
         return context
 
 

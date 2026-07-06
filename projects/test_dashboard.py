@@ -2,6 +2,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from catalog.models import MaterialProduct
+from estimating.models import LineItem
+from plans.models import Trace
+from plans.test_traces import make_plan_page
+
 from .models import Project
 
 User = get_user_model()
@@ -33,3 +38,58 @@ class DashboardTenancyTests(TestCase):
     def test_dashboard_requires_login(self):
         response = self.client.get(reverse('projects:dashboard'))
         self.assertEqual(response.status_code, 302)
+
+    def test_dashboard_shows_next_step_when_no_plans_uploaded(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.get(reverse('projects:dashboard'))
+
+        self.assertContains(response, 'No plans uploaded')
+        self.assertContains(response, 'Upload a PDF or image to start this takeoff.')
+
+    def test_dashboard_shows_needs_calibration_when_page_uploaded_but_not_scaled(self):
+        make_plan_page(self.project_a, label='Main Floor')
+        self.client.force_login(self.user_a)
+
+        response = self.client.get(reverse('projects:dashboard'))
+
+        self.assertContains(response, 'Needs calibration')
+
+    def test_dashboard_shows_ready_to_trace_when_page_is_calibrated(self):
+        page = make_plan_page(self.project_a, label='Main Floor')
+        page.scale_pixels_per_foot = 12
+        page.save(update_fields=['scale_pixels_per_foot'])
+        self.client.force_login(self.user_a)
+
+        response = self.client.get(reverse('projects:dashboard'))
+
+        self.assertContains(response, 'Ready to trace')
+
+    def test_dashboard_shows_tracing_in_progress_when_traces_exist_without_materials(self):
+        page = make_plan_page(self.project_a, label='Main Floor')
+        page.scale_pixels_per_foot = 12
+        page.save(update_fields=['scale_pixels_per_foot'])
+        Trace.objects.create(
+            plan_page=page, tool_type=Trace.ToolType.COUNT, geometry=[{'x': 1, 'y': 1}],
+        )
+        self.client.force_login(self.user_a)
+
+        response = self.client.get(reverse('projects:dashboard'))
+
+        self.assertContains(response, 'Tracing in progress')
+
+    def test_dashboard_shows_estimate_ready_when_line_items_exist(self):
+        estimate = self.project_a.get_or_create_estimate()
+        material = MaterialProduct.objects.create(name='Dashboard Stud', input_type=MaterialProduct.InputType.FT)
+        LineItem.objects.create(
+            estimate=estimate,
+            material=material,
+            role='Stud',
+            quantity=5,
+            source=LineItem.Source.MANUAL,
+        )
+        self.client.force_login(self.user_a)
+
+        response = self.client.get(reverse('projects:dashboard'))
+
+        self.assertContains(response, 'Estimate ready')

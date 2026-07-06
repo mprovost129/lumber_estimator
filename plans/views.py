@@ -193,6 +193,9 @@ class PlanUploadView(LoginRequiredMixin, View):
             plan.save()
             pages = rasterize_plan(plan)
             messages.success(request, f'Uploaded {plan.name} ({len(pages)} pages).')
+            if pages and request.POST.get('open_after_upload', '1') != '0':
+                messages.info(request, 'Calibrate this page to start tracing.')
+                return redirect('plans:viewer', pk=pages[0].pk)
         else:
             errors = '; '.join(
                 f'{field}: {", ".join(field_errors)}' for field, field_errors in form.errors.items()

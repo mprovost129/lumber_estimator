@@ -1,7 +1,9 @@
 import os
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -13,6 +15,45 @@ from .models import Plan, PlanPage, Trace
 from .test_traces import make_plan_page
 
 User = get_user_model()
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class PlanUploadViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='upload@example.com', password='testpass123')
+        self.project = Project.objects.create(account=self.user.account, name='Upload House')
+        JobSettings.objects.create(project=self.project)
+        self.client.force_login(self.user)
+
+    def _build_page(self, plan, label='Uploaded Page'):
+        page = PlanPage(plan=plan, page_number=1, label=label)
+        page.image.save('page.png', SimpleUploadedFile('page.png', b'fake-image-bytes'), save=False)
+        page.thumbnail.save('thumb.png', SimpleUploadedFile('thumb.png', b'fake-thumb-bytes'), save=False)
+        page.save()
+        return page
+
+    def test_upload_redirects_straight_to_viewer_by_default(self):
+        upload = SimpleUploadedFile('plan.png', b'fake-plan-bytes', content_type='image/png')
+
+        with patch('plans.views.rasterize_plan', side_effect=lambda plan: [self._build_page(plan)]):
+            response = self.client.post(
+                reverse('plans:upload', args=[self.project.pk]),
+                {'original_file': upload, 'open_after_upload': '1'},
+            )
+
+        page = PlanPage.objects.get(plan__project=self.project)
+        self.assertRedirects(response, reverse('plans:viewer', args=[page.pk]))
+
+    def test_upload_can_stay_on_project_detail_when_requested(self):
+        upload = SimpleUploadedFile('plan.png', b'fake-plan-bytes', content_type='image/png')
+
+        with patch('plans.views.rasterize_plan', side_effect=lambda plan: [self._build_page(plan)]):
+            response = self.client.post(
+                reverse('plans:upload', args=[self.project.pk]),
+                {'original_file': upload, 'open_after_upload': '0'},
+            )
+
+        self.assertRedirects(response, reverse('projects:detail', args=[self.project.pk]))
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())

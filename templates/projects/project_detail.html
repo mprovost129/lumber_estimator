@@ -30,9 +30,11 @@
     <h2 class="h5 mb-3">Upload a Plan</h2>
     <form method="post" enctype="multipart/form-data" action="{% url 'plans:upload' project.pk %}" class="d-flex flex-wrap align-items-center gap-2">
         {% csrf_token %}
+        <input type="hidden" name="open_after_upload" value="1">
         <input type="file" name="original_file" class="form-control" style="max-width: 360px;" accept="application/pdf,image/png,image/jpeg" required>
-        <button type="submit" class="btn btn-secondary"><i class="bi bi-upload"></i> Upload (PDF or Image)</button>
+        <button type="submit" class="btn btn-secondary"><i class="bi bi-upload"></i> Upload and Open</button>
     </form>
+    <p class="project-card-meta mb-0 mt-2">After upload, the first page opens right away so you can calibrate and start tracing.</p>
 </div>
 
 <h2 class="h5 mb-3">Plans</h2>

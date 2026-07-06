@@ -35,14 +35,21 @@
 {% if projects %}
 <div class="project-card-grid">
     {% for project in projects %}
-    <div class="project-card position-relative">
+    <div class="project-card">
         <div class="d-flex align-items-start justify-content-between">
-            <span class="project-card-title">{{ project.name }}</span>
+            <a class="project-card-title text-decoration-none" href="{% url 'projects:detail' project.pk %}">{{ project.name }}</a>
             <span class="badge rounded-pill badge-status-{{ project.status }}">{{ project.get_status_display }}</span>
         </div>
         {% if project.client %}<div class="project-card-meta"><i class="bi bi-person"></i> {{ project.client }}</div>{% endif %}
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge rounded-pill badge-status-{{ project.workflow_tone }}">{{ project.workflow_label }}</span>
+            <span class="project-card-meta">{{ project.workflow_hint }}</span>
+        </div>
         <div class="project-card-meta"><i class="bi bi-calendar3"></i> Created {{ project.created_at|date:'M j, Y' }}</div>
-        <a class="stretched-link" href="{% url 'projects:detail' project.pk %}"></a>
+        <div class="d-flex flex-wrap gap-2 mt-auto">
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'projects:detail' project.pk %}">Open Project</a>
+            <a class="btn btn-sm btn-primary" href="{% url 'projects:start-takeoff' project.pk %}">Continue</a>
+        </div>
     </div>
     {% endfor %}
 </div>
