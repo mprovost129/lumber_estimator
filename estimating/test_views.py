@@ -7,6 +7,8 @@ from django.test import TestCase
 from django.urls import reverse
 
 from catalog.models import MaterialProduct
+from plans.models import Trace
+from plans.test_traces import make_plan_page
 from projects.models import Estimate, Project
 
 from .models import LineItem
@@ -46,6 +48,21 @@ class EstimateDetailViewTests(TestCase):
     def test_requires_login(self):
         response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
         self.assertEqual(response.status_code, 302)
+
+    def test_tool_generated_line_links_back_to_source_trace(self):
+        page = make_plan_page(self.project_a, label='First Floor')
+        trace = Trace.objects.create(
+            plan_page=page, tool_type=Trace.ToolType.LINE, geometry=[{'x': 0, 'y': 0}, {'x': 10, 'y': 0}],
+        )
+        LineItem.objects.create(
+            estimate=self.estimate_a, material=self.material, trace=trace, role='Plate', quantity=2,
+            source=LineItem.Source.TOOL,
+        )
+
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
+
+        self.assertContains(response, f'{reverse("plans:viewer", args=[page.pk])}?trace={trace.pk}')
 
 
 class EstimateMaterialSummaryViewTests(TestCase):

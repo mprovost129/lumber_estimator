@@ -23,6 +23,6 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(ProjectTemplate)
 class ProjectTemplateAdmin(admin.ModelAdmin):
-    list_display = ('name', 'account', 'num_floors', 'foundation_type', 'first_floor_wall_height_in')
+    list_display = ('name', 'account', 'is_favorite', 'num_floors', 'foundation_type', 'first_floor_wall_height_in')
     list_filter = ('account', 'foundation_type', 'num_floors')
     search_fields = ('name', 'description')

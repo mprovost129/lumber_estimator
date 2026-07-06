@@ -129,7 +129,7 @@ class EstimateDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         account = self.request.user.account
         line_items = list(
-            self.object.line_items.select_related('material', 'trace')
+            self.object.line_items.select_related('material', 'trace__plan_page')
             .annotate(effective_category=_effective_category())
             .order_by()
         )

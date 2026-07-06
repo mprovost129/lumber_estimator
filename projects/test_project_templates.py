@@ -100,3 +100,50 @@ class ProjectTemplateLibraryTests(TestCase):
         self.assertContains(response, 'Saved House Template')
         self.assertContains(response, '109.125')
         self.assertContains(response, '97.125')
+
+    def test_can_duplicate_starter_template_into_account_copy(self):
+        starter = ProjectTemplate.objects.filter(account__isnull=True).first()
+
+        response = self.client.post(reverse('projects:template-duplicate', args=[starter.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        duplicate = ProjectTemplate.objects.get(account=self.user.account, name=f'{starter.name} (Copy)')
+        self.assertEqual(duplicate.first_floor_wall_height_in, starter.first_floor_wall_height_in)
+
+    def test_can_toggle_favorite_on_custom_template(self):
+        first = ProjectTemplate.objects.create(
+            account=self.user.account, name='Favorite One', num_floors=1, first_floor_wall_height_in=Decimal('97.125'),
+        )
+        second = ProjectTemplate.objects.create(
+            account=self.user.account, name='Favorite Two', num_floors=1, first_floor_wall_height_in=Decimal('109.125'),
+        )
+
+        self.client.post(reverse('projects:template-favorite', args=[first.pk]))
+        self.client.post(reverse('projects:template-favorite', args=[second.pk]))
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertFalse(first.is_favorite)
+        self.assertTrue(second.is_favorite)
+
+    def test_new_project_prefers_favorite_template(self):
+        favorite = ProjectTemplate.objects.create(
+            account=self.user.account,
+            name='Favorite Colonial',
+            is_favorite=True,
+            num_floors=2,
+            first_floor_wall_height_in=Decimal('109.125'),
+            second_floor_wall_height_in=Decimal('97.125'),
+        )
+
+        response = self.client.get(reverse('projects:create'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['selected_template'].pk, favorite.pk)
+        self.assertContains(response, 'Favorite Colonial')
+
+    def test_new_project_falls_back_to_first_visible_template(self):
+        response = self.client.get(reverse('projects:create'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(response.context['selected_template'])

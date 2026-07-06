@@ -28,10 +28,10 @@ A public, multi-tenant web application for building lumber material lists and es
 ## Application Flow
 
 1. User signs up (custom `User` model + built-in Django auth views) and lands on a **Dashboard** listing their Projects.
-2. From the Dashboard, **New Project** (`projects:create`) currently takes just name/client and auto-creates a `JobSettings` row with model defaults - the full Job Settings Wizard below is not yet built.
-3. The **Project Detail** page (`projects:detail`) lists the project's uploaded **Plans**, each as a thumbnail gallery of its **PlanPages** with an inline label field (e.g. "First Floor") and a **Delete Page** button (`plans:page-delete`) - not every page in an uploaded PDF package is wanted, so pages can be trimmed individually without re-uploading or discarding the whole Plan. Deleting a page cascades its Traces and their LineItems (same FK cascade as deleting a Trace directly) and removes its image/thumbnail files from storage; the parent Plan is left in place even with zero pages remaining.
-4. Clicking a thumbnail opens the **Plan Viewer** (`plans:viewer`) - a Fabric.js canvas over that page's image. Before quantities can be computed, the page must be **calibrated**: the Calibrate tool draws a reference line and the user enters its real-world length in feet, setting `PlanPage.scale_pixels_per_foot`. The user then picks the **Line/Wall tool**, sets Material and/or Assembly + settings (e.g. stud spacing) in the settings panel, and draws; each draw creates a **Trace** with that material/assembly/settings snapshotted onto it. If an Assembly is assigned, the calculation engine runs immediately against the trace's real measured length (from geometry + the page's calibration), generating `LineItem`s on the project's `Estimate`. Saved **ToolPresets** let a configured tool+material be reloaded later.
-5. The **Estimate/BOM view** (`estimating:estimate-detail`, linked from the project detail page) lists the computed `LineItem`s - the actual material list.
+2. From the Dashboard, **New Project** (`projects:create`) opens the built 3-step setup wizard (Project / Structure / Framing) and now also shows reusable **Project Templates**. Starter templates seed common house types, account-owned templates can be saved from job settings, and the wizard automatically preselects the user's favorite template when available or the first starter/default template otherwise.
+3. The **Project Detail** page (`projects:detail`) lists the project's uploaded **Plans**, each as a thumbnail gallery of its **PlanPages** with an inline label field (e.g. "First Floor") and a **Delete Page** button (`plans:page-delete`) - not every page in an uploaded PDF package is wanted, so pages can be trimmed individually without re-uploading or discarding the whole Plan. Upload now defaults to **Upload and Open**, which jumps straight into the first generated page in the viewer and prompts the user to calibrate instead of bouncing back through project detail. Deleting a page cascades its Traces and their LineItems (same FK cascade as deleting a Trace directly) and removes its image/thumbnail files from storage; the parent Plan is left in place even with zero pages remaining.
+4. Clicking a thumbnail (or landing there immediately after upload) opens the **Plan Viewer** (`plans:viewer`) - a Fabric.js canvas over that page's image. Before quantities can be computed, the page must be **calibrated**: the Calibrate tool draws a reference line and the user enters its real-world length in feet, setting `PlanPage.scale_pixels_per_foot`. The user then picks the **Line/Wall tool**, sets Material and/or Assembly + settings (e.g. stud spacing) in the settings panel, and draws; each draw creates a **Trace** with that material/assembly/settings snapshotted onto it. If an Assembly is assigned, the calculation engine runs immediately against the trace's real measured length (from geometry + the page's calibration), generating `LineItem`s on the project's `Estimate`. Saved **ToolPresets** let a configured tool+material be reloaded later, and editing a selected trace in the inspector now auto-saves after a short debounce while keeping a manual **Save now** fallback.
+5. The **Estimate/BOM view** (`estimating:estimate-detail`, linked from the project detail page) lists the computed `LineItem`s - the actual material list - and tool-generated rows now include a **Jump to source** link back to the exact plan page/trace that created them.
 6. Completed Projects can be **Archived** from the Dashboard (soft-hide, not delete).
 
 ## Intelligent Material / Assembly Drawing Direction
@@ -498,3 +498,40 @@ Tests: `estimating/test_views.py` (stats totals with exact BF math, bar hidden w
 - The drawer JS lives in `library.html` (materials via `json_script`, save then `location.reload()` so the grouped lists re-render server-side). The drawer subtitle tells the user whether saving edits in place or creates their custom copy.
 
 Tests: `estimating/test_views.py::AssemblyQuickEditTests` (GET shape, clone with source untouched, clone reuse on second edit, in-place edit on owned, foreign-material and out-of-range waste rejected, foreign custom assembly 404s). Suite: 280 tests + 30 subtests, all passing.
+
+## Project templates + dashboard workflow guidance
+
+Project setup is now template-driven instead of a blank wizard every time.
+
+- `projects.ProjectTemplate` stores reusable job-setting defaults (floors, foundation, wall heights, stud spacing, roof framing, pitch, floor material, siding material). Four seeded starter templates ship out of the box: two ranches and two colonials using the 8 ft 1-1/8 in and 9 ft 1-1/8 in wall-height defaults.
+- Wall-height fields on `JobSettings` and `ProjectTemplate` are `DecimalField(..., decimal_places=3)`, specifically so values like `97.125` and `109.125` are preserved exactly instead of being rounded to whole inches.
+- `projects:template-library` is the reusable template hub. Account-owned templates can be created, edited, deleted, duplicated, and marked favorite; starter templates remain global and read-only, but can be duplicated into an account copy for customization.
+- `ProjectTemplate.is_favorite` is account-only workflow memory. The library and New Project page sort favorites first, and `ProjectCreateView.get_template_object()` falls back to the favorite template when the user has not explicitly picked one, otherwise it preselects the first visible starter/default template.
+- `ProjectTemplateDuplicateView` copies either a starter or custom template into the current account with a collision-safe `"(Copy)"` suffix, then redirects into edit. `ProjectTemplateFavoriteToggleView` enforces a single favorite per account by clearing any previous favorite inside one transaction before setting the new one.
+
+The dashboard also now carries workflow-state guidance per project, computed cheaply with `Exists(...)` annotations rather than N+1 queries:
+
+- `No plans uploaded`
+- `Needs calibration`
+- `Ready to trace`
+- `Tracing in progress`
+- `Estimate ready`
+
+Each project card pairs that state badge with a short hint and direct `Open Project` / `Continue` actions, so users can tell the next step without drilling into the job first.
+
+## Upload handoff + trace source links
+
+Two navigation loops were tightened to reduce hunting:
+
+- `plans.PlanUploadView` now defaults to `open_after_upload=1`. After rasterization, it redirects straight to the first generated `PlanPage` viewer and flashes a calibration prompt. The old "stay on project detail" behavior still exists for callers that post `open_after_upload=0`.
+- Tool-generated rows on `estimating:estimate-detail` now show `Jump to source` when `LineItem.trace` exists. The link targets the owning plan page with `?trace=<trace id>`, e.g. `plans:viewer(page_id)?trace=123`.
+- `plans/static/plans/viewer.js` reads that `trace` query parameter on load, finds the matching Fabric object after the page image and traces are rendered, selects it, and opens the inspector automatically. This is intentionally lightweight: no new backend endpoint was needed because the page already serializes every visible trace into `traces-data`.
+
+## Trace inspector auto-save
+
+The viewer's selected-trace inspector no longer requires a save click for every small tweak.
+
+- The inspector panel in `templates/plans/viewer.html` now states `Changes save automatically.` and keeps the existing button as `Save now` for explicit retry/confirmation.
+- `plans/static/plans/viewer.js` adds a debounced auto-save layer around the existing `TRACE_UPDATE_URL_BASE` POST. `traceInspectorPanel` listens to delegated `input` and `change` events for the inspector fields, `scheduleSelectedTracePersist()` batches changes for 450 ms, and `persistSelectedTraceChanges()` reuses the same payload shape the old manual button used.
+- `inspectorSyncing` suppresses saves while the UI is being populated from a newly selected trace, `tracePersistNonce` prevents stale async responses from overwriting a newer edit session, and the small `#inspector-save-status` line tells the user whether the panel is pending, saving, saved, or failed.
+- The selected wall/framing modal already had its own auto-save path for member overrides; this change brings the main trace inspector in line with that behavior instead of mixing one live-edit workflow with one explicit-save workflow.

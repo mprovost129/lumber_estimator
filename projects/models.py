@@ -92,6 +92,10 @@ class ProjectTemplate(models.Model):
     )
     name = models.CharField(max_length=255)
     description = models.CharField(max_length=255, blank=True)
+    is_favorite = models.BooleanField(
+        default=False,
+        help_text='Shown first in the New Project flow and template library for this account.',
+    )
     sort_order = models.PositiveSmallIntegerField(default=100)
     num_floors = models.PositiveSmallIntegerField(default=1)
     foundation_type = models.CharField(
@@ -139,6 +143,32 @@ class ProjectTemplate(models.Model):
             'floor_material': self.floor_material,
             'siding_material': self.siding_material,
         }
+
+    def duplicate_for_account(self, account):
+        suffix = ' (Copy)'
+        base_name = f'{self.name}{suffix}'
+        name = base_name
+        counter = 2
+        while ProjectTemplate.objects.filter(account=account, name=name).exists():
+            name = f'{base_name} {counter}'
+            counter += 1
+        return ProjectTemplate.objects.create(
+            account=account,
+            name=name,
+            description=self.description,
+            is_favorite=False,
+            sort_order=self.sort_order,
+            num_floors=self.num_floors,
+            foundation_type=self.foundation_type,
+            basement_wall_height_in=self.basement_wall_height_in,
+            first_floor_wall_height_in=self.first_floor_wall_height_in,
+            second_floor_wall_height_in=self.second_floor_wall_height_in,
+            stud_spacing_in=self.stud_spacing_in,
+            roof_framing=self.roof_framing,
+            roof_pitch_rise_per_12=self.roof_pitch_rise_per_12,
+            floor_material=self.floor_material,
+            siding_material=self.siding_material,
+        )
 
     @classmethod
     def from_job_settings(cls, job_settings, **overrides):

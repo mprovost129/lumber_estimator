@@ -123,7 +123,14 @@
                         <td>{% if item.length_ft %}{{ item.length_ft|floatformat:1 }}{% endif %}</td>
                         <td class="text-end">{{ item.quantity }}</td>
                         <td>{{ item.waste_factor }}</td>
-                        <td>{{ item.get_source_display }}</td>
+                        <td>
+                            {{ item.get_source_display }}
+                            {% if item.trace_id and item.trace.plan_page_id %}
+                            <div class="small mt-1">
+                                <a href="{% url 'plans:viewer' item.trace.plan_page_id %}?trace={{ item.trace_id }}">Jump to source</a>
+                            </div>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if item.source == 'manual' %}
                             <form method="post" action="{% url 'estimating:line-item-delete' item.pk %}" class="d-inline">

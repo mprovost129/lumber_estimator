@@ -81,6 +81,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var inspectorParentWallSelect = document.getElementById('inspector-parent-wall-select');
     var inspectorColorInput = document.getElementById('inspector-color-input');
     var inspectorSettingsWrap = document.getElementById('inspector-settings');
+    var inspectorSaveStatus = document.getElementById('inspector-save-status');
     var saveTraceChangesButton = document.getElementById('save-trace-changes');
     var deleteInspectedButton = document.getElementById('delete-inspected-trace');
     var viewWallElevationButton = document.getElementById('view-wall-elevation');
@@ -121,6 +122,9 @@ document.addEventListener('DOMContentLoaded', function () {
     var selectedTrace = null;
     var isPanning = false;         // hand tool: click-drag in progress
     var panStart = null;
+    var inspectorSyncing = false;
+    var tracePersistTimer = null;
+    var tracePersistNonce = 0;
 
     showPanel('none');
 
@@ -132,6 +136,7 @@ document.addEventListener('DOMContentLoaded', function () {
         canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
         initialTraces.forEach(drawTrace);
         applyInitialZoom();
+        focusRequestedTrace();
     });
 
     // ---------------------------------------------------------- material list
@@ -1021,7 +1026,12 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         activateTool(null);
         selectedTrace = obj;
+        if (tracePersistTimer) {
+            clearTimeout(tracePersistTimer);
+            tracePersistTimer = null;
+        }
         var config = TOOLS[obj.traceToolType] || TOOLS.line;
+        inspectorSyncing = true;
         inspectorTitle.textContent = 'Selected ' + config.label;
         inspectorMeasurement.textContent = obj.traceMeasurement || '';
         inspectorMaterialSelect.value = obj.traceMaterialId || '';
@@ -1035,6 +1045,8 @@ document.addEventListener('DOMContentLoaded', function () {
         inspectorColorInput.value = obj.traceColor || config.color;
         viewWallElevationButton.style.display = (obj.traceToolType === 'line' || obj.traceToolType === 'polyline') ? '' : 'none';
         renderInspectorSettings(obj.traceToolType, obj.traceSettings || {});
+        updateInspectorSaveStatus('Changes save automatically.');
+        inspectorSyncing = false;
         showPanel('inspector');
     }
 
@@ -1201,6 +1213,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function onTraceDeselected() {
+        if (tracePersistTimer) {
+            clearTimeout(tracePersistTimer);
+            tracePersistTimer = null;
+        }
         selectedTrace = null;
         showPanel(activeTool && TOOLS[activeTool] ? 'tool-settings' : 'none');
     }
@@ -1239,10 +1255,56 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     saveTraceChangesButton.addEventListener('click', function () {
+        persistSelectedTraceChanges(true);
+    });
+
+    traceInspectorPanel.addEventListener('input', function (event) {
+        if (inspectorSyncing || !selectedTrace || !isInspectorAutoSaveTarget(event.target)) {
+            return;
+        }
+        scheduleSelectedTracePersist();
+    });
+    traceInspectorPanel.addEventListener('change', function (event) {
+        if (inspectorSyncing || !selectedTrace || !isInspectorAutoSaveTarget(event.target)) {
+            return;
+        }
+        scheduleSelectedTracePersist();
+    });
+
+    function isInspectorAutoSaveTarget(target) {
+        return Boolean(target && target.id && (
+            target.id.indexOf('inspector-') === 0 ||
+            target.id === 'inspector-material-select' ||
+            target.id === 'inspector-assembly-select' ||
+            target.id === 'inspector-parent-wall-select' ||
+            target.id === 'inspector-color-input'
+        ));
+    }
+
+    function scheduleSelectedTracePersist() {
         if (!selectedTrace) {
             return;
         }
+        if (tracePersistTimer) {
+            clearTimeout(tracePersistTimer);
+        }
+        updateInspectorSaveStatus('Auto-save pending...');
+        tracePersistTimer = setTimeout(function () {
+            persistSelectedTraceChanges(false);
+        }, 450);
+    }
+
+    function persistSelectedTraceChanges(force) {
+        if (!selectedTrace) {
+            return;
+        }
+        if (tracePersistTimer) {
+            clearTimeout(tracePersistTimer);
+            tracePersistTimer = null;
+        }
+        var nonce = ++tracePersistNonce;
         var toolType = selectedTrace.traceToolType;
+        updateInspectorSaveStatus(force ? 'Saving now...' : 'Saving...');
         fetch(TRACE_UPDATE_URL_BASE.replace('0', selectedTrace.traceId), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
@@ -1256,6 +1318,9 @@ document.addEventListener('DOMContentLoaded', function () {
         })
             .then(handleJsonResponse)
             .then(function (trace) {
+                if (!selectedTrace || nonce !== tracePersistNonce) {
+                    return;
+                }
                 selectedTrace.traceMaterialId = trace.material_id;
                 selectedTrace.traceAssemblyId = trace.assembly_id;
                 selectedTrace.traceParentWallId = trace.parent_wall_id;
@@ -1264,10 +1329,37 @@ document.addEventListener('DOMContentLoaded', function () {
                 selectedTrace.traceMeasurement = trace.measurement_display || selectedTrace.traceMeasurement;
                 restyleTrace(selectedTrace);
                 inspectorMeasurement.textContent = selectedTrace.traceMeasurement || '';
+                updateInspectorSaveStatus('Saved.');
                 refreshMaterialList();
             })
-            .catch(showError);
-    });
+            .catch(function (error) {
+                updateInspectorSaveStatus('Auto-save failed. Use Save now to retry.');
+                showError(error);
+            });
+    }
+
+    function updateInspectorSaveStatus(message) {
+        if (inspectorSaveStatus) {
+            inspectorSaveStatus.textContent = message;
+        }
+    }
+
+    function focusRequestedTrace() {
+        var params = new URLSearchParams(window.location.search);
+        var traceId = parseInt(params.get('trace'), 10);
+        if (!traceId) {
+            return;
+        }
+        var match = canvas.getObjects().find(function (obj) {
+            return obj.traceId === traceId;
+        });
+        if (!match) {
+            return;
+        }
+        canvas.setActiveObject(match);
+        canvas.requestRenderAll();
+        onTraceSelected();
+    }
 
     // -------------------------------------------------------- wall elevation
 

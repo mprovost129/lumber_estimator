@@ -27,6 +27,8 @@
             </div>
             {% if template_item.is_system %}
             <span class="pill"><i class="bi bi-stars"></i> Starter</span>
+            {% elif template_item.is_favorite %}
+            <span class="pill"><i class="bi bi-heart-fill"></i> Favorite</span>
             {% else %}
             <span class="pill"><i class="bi bi-person-badge"></i> Yours</span>
             {% endif %}
@@ -39,7 +41,15 @@
         </div>
         <div class="d-flex flex-wrap gap-2 mt-auto">
             <a class="btn btn-sm btn-primary" href="{% url 'projects:create' %}?template={{ template_item.pk }}">Use for Project</a>
+            <form method="post" action="{% url 'projects:template-duplicate' template_item.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-primary">Duplicate</button>
+            </form>
             {% if not template_item.is_system %}
+            <form method="post" action="{% url 'projects:template-favorite' template_item.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-secondary">{% if template_item.is_favorite %}Unfavorite{% else %}Favorite{% endif %}</button>
+            </form>
             <a class="btn btn-sm btn-outline-secondary" href="{% url 'projects:template-update' template_item.pk %}">Edit</a>
             <a class="btn btn-sm btn-outline-danger" href="{% url 'projects:template-delete' template_item.pk %}">Delete</a>
             {% endif %}

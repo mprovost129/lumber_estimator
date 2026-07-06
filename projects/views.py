@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db import transaction
 from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -40,6 +41,10 @@ def _project_workflow_state(project):
         'tone': 'info',
         'hint': 'Plans are uploaded and calibrated. Start drawing takeoff items.',
     }
+
+
+def _template_sort_key(template):
+    return (0 if template.is_favorite else 1, 0 if template.account_id else 1, template.sort_order, template.name.lower())
 
 
 class StartTakeoffView(LoginRequiredMixin, View):
@@ -118,8 +123,21 @@ class ProjectCreateView(LoginRequiredMixin, FormView):
     def get_template_object(self):
         template_id = self.request.GET.get('template') or self.request.POST.get('template')
         if not template_id:
-            return None
+            return self.get_default_template()
         return ProjectTemplate.objects.visible_to(self.request.user.account).filter(pk=template_id).first()
+
+    def get_default_template(self):
+        account = self.request.user.account
+        favorite = (
+            ProjectTemplate.objects.filter(account=account, is_favorite=True)
+            .order_by('sort_order', 'name')
+            .first()
+        )
+        if favorite is not None:
+            return favorite
+        templates = list(ProjectTemplate.objects.visible_to(account))
+        templates.sort(key=_template_sort_key)
+        return templates[0] if templates else None
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -129,7 +147,9 @@ class ProjectCreateView(LoginRequiredMixin, FormView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['project_templates'] = ProjectTemplate.objects.visible_to(self.request.user.account)
+        templates = list(ProjectTemplate.objects.visible_to(self.request.user.account))
+        templates.sort(key=_template_sort_key)
+        context['project_templates'] = templates
         context['selected_template'] = self.get_template_object()
         return context
 
@@ -192,7 +212,9 @@ class ProjectTemplateListView(LoginRequiredMixin, ListView):
 
     def get_queryset(self):
         account = self.request.user.account
-        return ProjectTemplate.objects.visible_to(account).order_by('account_id', 'sort_order', 'name')
+        templates = list(ProjectTemplate.objects.visible_to(account))
+        templates.sort(key=_template_sort_key)
+        return templates
 
 
 class ProjectTemplateCreateView(LoginRequiredMixin, CreateView):
@@ -247,3 +269,26 @@ class ProjectTemplateDeleteView(ProjectTemplateMixin, DeleteView):
 
     def get_success_url(self):
         return reverse('projects:template-library')
+
+
+class ProjectTemplateDuplicateView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        source = get_object_or_404(ProjectTemplate.objects.visible_to(request.user.account), pk=pk)
+        duplicate = source.duplicate_for_account(request.user.account)
+        messages.success(request, f'Project template "{duplicate.name}" created as a copy.')
+        return redirect('projects:template-update', pk=duplicate.pk)
+
+
+class ProjectTemplateFavoriteToggleView(ProjectTemplateMixin, View):
+    def post(self, request, pk):
+        template = get_object_or_404(self.get_queryset(), pk=pk)
+        with transaction.atomic():
+            if not template.is_favorite:
+                ProjectTemplate.objects.filter(account=request.user.account, is_favorite=True).update(is_favorite=False)
+            template.is_favorite = not template.is_favorite
+            template.save(update_fields=['is_favorite'])
+        messages.success(
+            request,
+            f'Project template "{template.name}" {"set as favorite" if template.is_favorite else "removed from favorites"}.',
+        )
+        return redirect('projects:template-library')

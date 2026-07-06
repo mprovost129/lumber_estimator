@@ -95,6 +95,7 @@
             <div class="d-flex align-items-start justify-content-between gap-2">
                 <h3 class="template-card-title">{{ template_option.name }}</h3>
                 {% if template_option.is_system %}<span class="pill"><i class="bi bi-stars"></i> Starter</span>{% endif %}
+                {% if not template_option.is_system and template_option.is_favorite %}<span class="pill"><i class="bi bi-heart-fill"></i> Favorite</span>{% endif %}
             </div>
             {% if template_option.description %}
             <p class="template-card-meta">{{ template_option.description }}</p>
