@@ -2764,21 +2764,42 @@ document.addEventListener('DOMContentLoaded', function () {
     // Persisted in localStorage (not sessionStorage) since this is about the
     // user's familiarity with the app, not any one page/session.
     var ONBOARDING_TIP_KEY = 'planViewerOnboardingTipDismissed';
+    var onboardingTipTimer = null;
 
     function onboardingTipDismissed() {
         try {
-            return window.localStorage.getItem(ONBOARDING_TIP_KEY) === '1';
-        } catch (e) {
-            return false;
-        }
+            if (window.localStorage.getItem(ONBOARDING_TIP_KEY) === '1') {
+                return true;
+            }
+        } catch (e) { /* storage unavailable */ }
+        return document.cookie.indexOf(ONBOARDING_TIP_KEY + '=1') !== -1;
+    }
+
+    function persistOnboardingTipDismissal() {
+        try {
+            window.localStorage.setItem(ONBOARDING_TIP_KEY, '1');
+        } catch (e) { /* storage unavailable */ }
+        document.cookie = ONBOARDING_TIP_KEY + '=1; path=/; max-age=' + (60 * 60 * 24 * 365);
     }
 
     function dismissOnboardingTip() {
-        try {
-            window.localStorage.setItem(ONBOARDING_TIP_KEY, '1');
-        } catch (e) { /* storage unavailable - tip will just keep showing, not critical */ }
+        if (onboardingTipTimer) {
+            window.clearTimeout(onboardingTipTimer);
+            onboardingTipTimer = null;
+        }
+        persistOnboardingTipDismissal();
         noSelectionPanel.style.display = 'none';
         refreshToolPanelVisibility();
+    }
+
+    function scheduleOnboardingTipAutoDismiss() {
+        if (onboardingTipTimer || onboardingTipDismissed()) {
+            return;
+        }
+        onboardingTipTimer = window.setTimeout(function () {
+            onboardingTipTimer = null;
+            dismissOnboardingTip();
+        }, 5000);
     }
 
     if (dismissOnboardingTipButton) {
@@ -2803,6 +2824,12 @@ document.addEventListener('DOMContentLoaded', function () {
         calibratePanel.style.display = name === 'calibrate' ? '' : 'none';
         toolSettingsPanel.style.display = name === 'tool-settings' ? '' : 'none';
         traceInspectorPanel.style.display = name === 'inspector' ? '' : 'none';
+        if (noSelectionPanel.style.display !== 'none') {
+            scheduleOnboardingTipAutoDismiss();
+        } else if (onboardingTipTimer) {
+            window.clearTimeout(onboardingTipTimer);
+            onboardingTipTimer = null;
+        }
         refreshToolPanelVisibility();
     }
 
