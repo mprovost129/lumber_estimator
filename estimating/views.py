@@ -12,6 +12,7 @@ from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
+from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, TemplateView
 
@@ -86,6 +87,38 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
         row['category_label'] = CATEGORY_LABELS.get(row['effective_category'], row['effective_category'])
         row['role_label'] = row.get('min_role') or ''
     return rows
+
+
+def _attach_label_lengths(order_list):
+    """Rows whose line items carry no piece length (e.g. studs traced without
+    a wall height in the settings snapshot) still deserve a usable label for
+    the viewer's trace linking. Fall back to the measured run length of the
+    linked traces when every linked trace agrees on one length. Display-only:
+    the order list's length column stays honest (blank means uncut/unknown)."""
+    from plans.geometry import measure_geometry
+    from plans.models import Trace
+
+    pending = [row for row in order_list if not row.get('length_ft') and row.get('trace_ids')]
+    trace_ids = {trace_id for row in pending for trace_id in row['trace_ids']}
+    if not trace_ids:
+        return
+    traces = {
+        trace.pk: trace
+        for trace in Trace.objects.filter(pk__in=trace_ids).select_related('plan_page')
+    }
+    for row in pending:
+        lengths = set()
+        for trace_id in row['trace_ids']:
+            trace = traces.get(trace_id)
+            if trace is None or trace.plan_page.scale_pixels_per_foot is None:
+                continue
+            measurement = measure_geometry(
+                trace.tool_type, trace.geometry, trace.plan_page.scale_pixels_per_foot, trace.settings,
+            )
+            if 'length_ft' in measurement:
+                lengths.add(int(round(float(measurement['length_ft']))))
+        if len(lengths) == 1:
+            row['label_length_ft'] = lengths.pop()
 
 
 def _summary_line_items(estimate, page_id=None, page_only=False):
@@ -234,6 +267,7 @@ class EstimateMaterialSummaryView(LoginRequiredMixin, DetailView):
             current_page_id=current_page_id,
             page_only=page_only,
         )
+        _attach_label_lengths(context['order_list'])
         context['totals'] = _summary_totals(context['order_list'])
         context['page_only'] = page_only
         context['current_page_id'] = current_page_id
@@ -395,6 +429,165 @@ class ManualLineItemDeleteView(LoginRequiredMixin, View):
         line_item.delete()
         messages.success(request, 'Line removed.')
         return redirect('estimating:estimate-detail', pk=estimate_id)
+
+
+class MaterialImportView(LoginRequiredMixin, View):
+    """Import supplier material lists (CSV or XLSX) into the account's own
+    catalog, e.g. a manufacturer's hanger list. Header row required; columns
+    (case-insensitive): name (required), category (key or label), species,
+    grade, dimension, input_type (ft/box/each), quantity_per_box,
+    lengths (semicolon/comma separated feet), default_length. Rows whose name
+    already exists for this account are skipped, so re-importing an updated
+    file is safe."""
+
+    template_name = 'estimating/material_import.html'
+    MAX_BYTES = 2 * 1024 * 1024
+    MAX_ROWS = 2000
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+    def post(self, request):
+        from decimal import InvalidOperation
+
+        from catalog.models import MaterialLength, MaterialProduct
+
+        upload = request.FILES.get('file')
+        if upload is None:
+            messages.error(request, 'Choose a CSV or XLSX file to import.')
+            return render(request, self.template_name)
+        if upload.size > self.MAX_BYTES:
+            messages.error(request, 'File is too large (2 MB limit).')
+            return render(request, self.template_name)
+
+        try:
+            rows = self._read_rows(upload)
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return render(request, self.template_name)
+
+        label_to_key = {label.lower(): key for key, label in MaterialProduct.Category.choices}
+        valid_keys = {key for key, _ in MaterialProduct.Category.choices}
+        account = request.user.account
+        existing = set(
+            MaterialProduct.objects.filter(account=account).values_list('name', flat=True)
+        )
+
+        created, skipped, errors = 0, 0, []
+        with transaction.atomic():
+            for line_number, row in rows:
+                name = (row.get('name') or '').strip()
+                if not name:
+                    errors.append(f'Row {line_number}: missing name.')
+                    continue
+                if name in existing:
+                    skipped += 1
+                    continue
+
+                raw_category = (row.get('category') or '').strip().lower()
+                category = (
+                    raw_category if raw_category in valid_keys
+                    else label_to_key.get(raw_category, MaterialProduct.Category.UNCATEGORIZED)
+                )
+                input_type = (row.get('input_type') or 'each').strip().lower()
+                if input_type not in ('ft', 'box', 'each'):
+                    errors.append(f'Row {line_number}: input_type must be ft, box, or each.')
+                    continue
+
+                quantity_per_box = None
+                if input_type == 'box':
+                    try:
+                        quantity_per_box = int(float(row.get('quantity_per_box') or 0)) or None
+                    except (TypeError, ValueError):
+                        quantity_per_box = None
+                    if quantity_per_box is None:
+                        errors.append(f'Row {line_number}: box materials need quantity_per_box.')
+                        continue
+
+                lengths, default_length = [], None
+                if input_type == 'ft':
+                    raw_lengths = str(row.get('lengths') or '').replace(';', ',')
+                    try:
+                        lengths = [Decimal(part.strip()) for part in raw_lengths.split(',') if part.strip()]
+                        raw_default = str(row.get('default_length') or '').strip()
+                        default_length = Decimal(raw_default) if raw_default else None
+                    except (InvalidOperation, ValueError):
+                        errors.append(f'Row {line_number}: lengths must be numbers of feet.')
+                        continue
+                    if not lengths:
+                        errors.append(f'Row {line_number}: ft materials need at least one stock length.')
+                        continue
+                    if default_length is None or default_length not in lengths:
+                        default_length = lengths[0]
+
+                product = MaterialProduct.objects.create(
+                    account=account, name=name, slug=slugify(name),
+                    category=category,
+                    species=(row.get('species') or '').strip(),
+                    grade=(row.get('grade') or '').strip(),
+                    nominal_dimension=(row.get('dimension') or '').strip(),
+                    input_type=input_type, quantity_per_box=quantity_per_box,
+                )
+                for length in lengths:
+                    MaterialLength.objects.create(
+                        product=product, length_ft=length, is_default=(length == default_length),
+                    )
+                existing.add(name)
+                created += 1
+
+        summary = f'Imported {created} material{"s" if created != 1 else ""}.'
+        if skipped:
+            summary += f' Skipped {skipped} already in your library.'
+        messages.success(request, summary)
+        for error in errors[:10]:
+            messages.warning(request, error)
+        if len(errors) > 10:
+            messages.warning(request, f'...and {len(errors) - 10} more rows had problems.')
+        return redirect('estimating:library')
+
+    def _read_rows(self, upload):
+        """Yields (line_number, {header: value}) for CSV or XLSX uploads."""
+        name = (upload.name or '').lower()
+        if name.endswith('.xlsx'):
+            try:
+                from openpyxl import load_workbook
+            except ImportError as exc:
+                raise ValueError('XLSX support requires the openpyxl package.') from exc
+            try:
+                sheet = load_workbook(upload, read_only=True, data_only=True).worksheets[0]
+            except Exception as exc:
+                raise ValueError('Could not read that XLSX file.') from exc
+            iterator = sheet.iter_rows(values_only=True)
+            try:
+                headers = [str(cell or '').strip().lower() for cell in next(iterator)]
+            except StopIteration:
+                raise ValueError('The file is empty.') from None
+            rows = []
+            for index, values in enumerate(iterator, start=2):
+                if index - 1 > self.MAX_ROWS:
+                    raise ValueError(f'Too many rows (limit {self.MAX_ROWS}).')
+                row = {headers[i]: values[i] for i in range(min(len(headers), len(values)))}
+                if any(str(v or '').strip() for v in row.values()):
+                    rows.append((index, row))
+            return rows
+        if name.endswith('.csv'):
+            import io
+            try:
+                text = upload.read().decode('utf-8-sig')
+            except UnicodeDecodeError:
+                raise ValueError('CSV must be UTF-8 encoded.') from None
+            reader = csv.DictReader(io.StringIO(text))
+            if not reader.fieldnames:
+                raise ValueError('The file is empty.')
+            reader.fieldnames = [(field or '').strip().lower() for field in reader.fieldnames]
+            rows = []
+            for index, row in enumerate(reader, start=2):
+                if index - 1 > self.MAX_ROWS:
+                    raise ValueError(f'Too many rows (limit {self.MAX_ROWS}).')
+                if any((value or '').strip() for value in row.values() if isinstance(value, str)):
+                    rows.append((index, row))
+            return rows
+        raise ValueError('Upload a .csv or .xlsx file.')
 
 
 class AssemblyQuickEditView(LoginRequiredMixin, View):

@@ -5,13 +5,29 @@ from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.views import View
-from django.views.generic import CreateView, DeleteView, DetailView, FormView, ListView, UpdateView
+from django.views.generic import (
+    CreateView,
+    DeleteView,
+    DetailView,
+    FormView,
+    ListView,
+    UpdateView,
+)
 
 from .forms import JobSettingsForm, ProjectSetupForm, ProjectTemplateForm
 from .models import JobSettings, Project, ProjectTemplate
 
 
 def _project_workflow_state(project):
+    # Line items first: a manual material list makes an estimate ready even
+    # when no plan was ever uploaded, so quantity presence outranks the
+    # upload/calibration prompts.
+    if project.has_line_items:
+        return {
+            'label': 'Estimate ready',
+            'tone': 'active',
+            'hint': 'Material quantities have been generated for this job.',
+        }
     if not project.has_pages:
         return {
             'label': 'No plans uploaded',

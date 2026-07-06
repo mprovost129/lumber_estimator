@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import Account
+from billing.models import EstimateAccessGrant
 from catalog.models import MaterialLength, MaterialProduct
 from projects.models import Estimate, Project
 
@@ -271,6 +272,10 @@ class CsvExportCategoryTests(TestCase):
             category=Assembly.Category.WALL_SYSTEM, source=LineItem.Source.TOOL,
         )
 
+        EstimateAccessGrant.objects.create(
+            estimate=estimate, purchased_by=user,
+            status=EstimateAccessGrant.Status.PAID, stripe_checkout_session_id='cs_cat_paid',
+        )
         self.client.force_login(user)
         response = self.client.get(reverse('estimating:estimate-csv', args=[estimate.pk]))
         rows = list(csv.reader(response.content.decode().splitlines()))

@@ -46,7 +46,7 @@
         <tbody>
             {% for row in group.list %}
             <tr class="material-summary-row {% if not row.trace_ids %}is-unlinked{% endif %} {% if row.total_trace_count and not row.visible_trace_count %}is-off-page{% endif %}"
-                data-material-label="{{ row.material__name }}{% if row.role_label %} - {{ row.role_label }}{% endif %}{% if row.length_ft %} - {{ row.length_ft|floatformat:0 }} ft{% endif %}"
+                data-material-label="{{ row.material__name }}{% if row.role_label %} - {{ row.role_label }}{% endif %}{% if row.length_ft %} - {{ row.length_ft|floatformat:0 }} ft{% elif row.label_length_ft %} - {{ row.label_length_ft }} ft{% endif %}"
                 data-category-label="{{ group.grouper }}"
                 data-quantity="{{ row.total_quantity }}"
                 data-visible-trace-count="{{ row.visible_trace_count|default:0 }}"
@@ -71,7 +71,14 @@
                     </div>
                     {% endif %}
                 </td>
-                <td class="text-end">{{ row.total_quantity }}</td>
+                <td class="text-end text-nowrap">
+                    {% if row.trace_ids %}
+                    <button type="button" class="mat-vis-toggle" title="Show or hide these traces on the plan" aria-label="Toggle trace visibility">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    {% endif %}
+                    {{ row.total_quantity }}
+                </td>
             </tr>
             {% endfor %}
         </tbody>

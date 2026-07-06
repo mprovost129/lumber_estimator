@@ -792,3 +792,108 @@ body.asm-drawer-open { overflow: hidden; }
 }
 .quote-head-meta dt { color: var(--text-muted); font-weight: 500; margin: 0; }
 .quote-head-meta dd { margin: 0; font-weight: 600; text-align: right; }
+
+/* =============================================================================
+   Marketing pages (home + pricing)
+   ============================================================================= */
+
+.mkt-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; padding: 1rem 0 0.5rem; max-width: 1080px; margin: 0 auto;
+}
+.mkt-brand { display: inline-flex; align-items: center; gap: 0.55rem; font-weight: 700; font-size: 1.05rem; color: var(--text); }
+.mkt-brand-mark {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    display: grid; place-items: center; color: #fff; font-size: 0.95rem;
+}
+.mkt-nav-links { display: flex; align-items: center; gap: 1.1rem; }
+.mkt-nav-links a { font-weight: 600; font-size: 0.92rem; }
+
+.mkt-hero { text-align: center; max-width: 760px; margin: 3.5rem auto 3rem; }
+.mkt-hero-slim { margin: 2.5rem auto 2rem; }
+.mkt-eyebrow {
+    display: inline-block; font-size: 0.78rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--primary-700); background: var(--primary-soft);
+    border: 1px solid var(--primary-line);
+    padding: 0.3rem 0.8rem; border-radius: 999px; margin-bottom: 1.1rem;
+}
+.mkt-h1 { font-size: clamp(2rem, 5vw, 3.1rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1.08; margin-bottom: 1rem; }
+.mkt-h2 { font-size: 1.55rem; font-weight: 750; letter-spacing: -0.02em; text-align: center; margin-bottom: 1.75rem; }
+.mkt-lead { color: var(--text-muted); font-size: 1.08rem; max-width: 620px; margin: 0 auto 1.5rem; }
+.mkt-cta-row { display: flex; justify-content: center; gap: 0.75rem; flex-wrap: wrap; }
+.mkt-subnote { color: var(--text-faint); font-size: 0.85rem; margin-top: 0.9rem; }
+
+.mkt-steps {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem; max-width: 1000px; margin: 0 auto 3.5rem;
+}
+.mkt-step {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.5rem; box-shadow: var(--shadow-sm);
+}
+.mkt-step-num {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--primary); color: #fff; font-weight: 700;
+    display: grid; place-items: center; margin-bottom: 0.8rem;
+}
+.mkt-step h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.35rem; }
+.mkt-step p { color: var(--text-muted); font-size: 0.92rem; margin: 0; }
+
+.mkt-features { max-width: 1000px; margin: 0 auto 3.5rem; }
+.mkt-feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+.mkt-feature {
+    display: flex; gap: 0.85rem; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.1rem 1.2rem; box-shadow: var(--shadow-sm);
+}
+.mkt-feature .bi { font-size: 1.3rem; color: var(--primary); margin-top: 0.1rem; }
+.mkt-feature strong { display: block; margin-bottom: 0.15rem; }
+.mkt-feature span { color: var(--text-muted); font-size: 0.88rem; }
+
+.mkt-final { text-align: center; margin: 0 auto 3.5rem; }
+.mkt-final .mkt-h2 { margin-bottom: 1.1rem; }
+.mkt-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1080px; margin: 0 auto; padding: 1.25rem 0 0.5rem;
+    border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.88rem;
+}
+.mkt-foot a { margin-left: 1rem; font-weight: 600; }
+
+.price-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.1rem; max-width: 1020px; margin: 0 auto;
+}
+.price-card {
+    position: relative;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 1.6rem 1.5rem;
+    box-shadow: var(--shadow-sm); display: flex; flex-direction: column;
+}
+.price-card-featured { border-color: var(--primary); box-shadow: var(--shadow-md); }
+.price-flag {
+    position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #fff; font-size: 0.7rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0.22rem 0.7rem; border-radius: 999px;
+}
+.price-name { font-weight: 700; color: var(--text-muted); text-transform: uppercase; font-size: 0.78rem; letter-spacing: 0.07em; }
+.price-amount { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em; margin: 0.3rem 0 0.5rem; }
+.price-desc { color: var(--text-muted); font-size: 0.9rem; min-height: 3.2em; }
+.price-list { list-style: none; margin: 0 0 1.25rem; padding: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.9rem; }
+.price-list .bi { color: var(--success); margin-right: 0.45rem; }
+
+/* =============================================================================
+   Plan viewer: material visibility toggles
+   ============================================================================= */
+
+.mat-vis-toggle {
+    border: none; background: transparent; cursor: pointer;
+    color: var(--text-faint); padding: 0 0.35rem 0 0;
+    font-size: 0.95rem; vertical-align: middle;
+    transition: color 0.13s ease;
+}
+.mat-vis-toggle:hover { color: var(--primary); }
+.material-summary-row.is-material-hidden { opacity: 0.45; }
+.material-summary-row.is-material-hidden .mat-vis-toggle { color: var(--accent); }

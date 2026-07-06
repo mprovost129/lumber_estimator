@@ -1,39 +1,70 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Lumber Estimator{% endblock %}
-{% block meta_description %}Trace plans and generate lumber material lists.{% endblock %}
+{% block title %}Lumber Estimator - Takeoffs your supplier can quote{% endblock %}
+{% block meta_description %}Upload your plans, trace walls and openings, and hand your lumber supplier a quote-ready material list in minutes.{% endblock %}
 
 {% block content %}
-<div class="hero-panel text-center">
-    <i class="bi bi-rulers" style="font-size: 2.5rem; color: var(--brand-steel-blue);"></i>
-    <h1 class="mt-3">Lumber Estimator</h1>
-    <p class="project-card-meta mb-4" style="max-width: 480px; margin-inline: auto;">
-        Upload a plan, trace walls and openings, and generate an accurate lumber material list
-        - ready for your supplier.
-    </p>
-    {% if user.is_authenticated %}
-    <a class="btn btn-primary" href="{% url 'projects:dashboard' %}"><i class="bi bi-kanban"></i> Go to Dashboard</a>
-    {% else %}
-    <a class="btn btn-primary" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right"></i> Log In</a>
-    {% endif %}
-</div>
+<header class="mkt-nav">
+    <span class="mkt-brand"><span class="mkt-brand-mark"><i class="bi bi-rulers"></i></span> Lumber Estimator</span>
+    <nav class="mkt-nav-links">
+        <a href="{% url 'core:pricing' %}">Pricing</a>
+        <a href="{% url 'login' %}">Log in</a>
+        <a class="btn btn-primary btn-sm" href="{% url 'login' %}">Get started</a>
+    </nav>
+</header>
 
-<div class="project-card-grid mt-4">
-    <div class="info-card">
-        <i class="bi bi-file-earmark-pdf" style="font-size: 1.5rem; color: var(--brand-steel-blue);"></i>
-        <div class="project-card-title mt-2">Upload Plans</div>
-        <div class="project-card-meta">Drop in a PDF or image and it's split into labeled, calibrated pages.</div>
+<section class="mkt-hero">
+    <span class="mkt-eyebrow">Built for framers, deck builders, and GCs</span>
+    <h1 class="mkt-h1">From plan to lumber list<br>in one sitting</h1>
+    <p class="mkt-lead">
+        Upload the plans, trace the walls, floors, and roof right on the page, and walk away
+        with a supplier-ready material list. No spreadsheets, no scale ruler, no re-counting studs.
+    </p>
+    <div class="mkt-cta-row">
+        <a class="btn btn-primary btn-lg" href="{% url 'login' %}"><i class="bi bi-lightning-charge"></i> Start a takeoff</a>
+        <a class="btn btn-light btn-lg" href="{% url 'core:pricing' %}">See pricing</a>
     </div>
-    <div class="info-card">
-        <i class="bi bi-bricks" style="font-size: 1.5rem; color: var(--brand-steel-blue);"></i>
-        <div class="project-card-title mt-2">Trace Elements</div>
-        <div class="project-card-meta">Draw walls, floors, roofs, and openings directly on the plan.</div>
+    <p class="mkt-subnote">Free to trace. Pay only when you export.</p>
+</section>
+
+<section class="mkt-steps">
+    <div class="mkt-step">
+        <div class="mkt-step-num">1</div>
+        <h3>Upload your plans</h3>
+        <p>Drop in a PDF or photo. Every sheet becomes a calibrated, labeled page you can draw on.</p>
     </div>
-    <div class="info-card">
-        <i class="bi bi-list-check" style="font-size: 1.5rem; color: var(--brand-steel-blue);"></i>
-        <div class="project-card-title mt-2">Generate a Material List</div>
-        <div class="project-card-meta">Assign an assembly and get a supplier-ready quantity takeoff.</div>
+    <div class="mkt-step">
+        <div class="mkt-step-num">2</div>
+        <h3>Trace the structure</h3>
+        <p>Walls, openings, beams, joists, columns, decks. Smart tools with framing built in: spacing, plates, headers, corners.</p>
     </div>
-</div>
+    <div class="mkt-step">
+        <div class="mkt-step-num">3</div>
+        <h3>Hand off the list</h3>
+        <p>A grouped, quantified order list by construction system. Print it or export CSV and send it straight to the yard.</p>
+    </div>
+</section>
+
+<section class="mkt-features">
+    <h2 class="mkt-h2">Everything a takeoff needs, nothing it doesn't</h2>
+    <div class="mkt-feature-grid">
+        <div class="mkt-feature"><i class="bi bi-magic"></i><div><strong>Framing formulas built in</strong><span>Studs by spacing, plates by stock length, headers by opening, sheathing by coverage. Waste factors included.</span></div></div>
+        <div class="mkt-feature"><i class="bi bi-boxes"></i><div><strong>A real material catalog</strong><span>Dimensional, PT, engineered, sheathing, roofing, decking, connectors, and fasteners. Add your own or import a supplier list.</span></div></div>
+        <div class="mkt-feature"><i class="bi bi-diagram-3"></i><div><strong>Assemblies, not line items</strong><span>Trace one wall and get studs, plates, sheathing, wrap, and nails together. Tune any assembly to your practice.</span></div></div>
+        <div class="mkt-feature"><i class="bi bi-rulers"></i><div><strong>Calibrated measuring</strong><span>Set the scale once per page. Every trace measures in real feet from then on.</span></div></div>
+        <div class="mkt-feature"><i class="bi bi-list-check"></i><div><strong>Supplier-ready output</strong><span>Grouped by system in build order, with lengths and quantities a yard can price line by line.</span></div></div>
+        <div class="mkt-feature"><i class="bi bi-arrow-repeat"></i><div><strong>Live totals as you trace</strong><span>Pieces, order lines, and framing board feet update with every element you draw.</span></div></div>
+    </div>
+</section>
+
+<section class="mkt-final">
+    <h2 class="mkt-h2">Your next bid, measured once</h2>
+    <a class="btn btn-primary btn-lg" href="{% url 'login' %}"><i class="bi bi-lightning-charge"></i> Get started free</a>
+</section>
+
+<footer class="mkt-foot">
+    <span>Lumber Estimator</span>
+    <nav><a href="{% url 'core:pricing' %}">Pricing</a> <a href="{% url 'login' %}">Log in</a></nav>
+</footer>
 {% endblock %}

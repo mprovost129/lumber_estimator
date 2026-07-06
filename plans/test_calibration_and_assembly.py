@@ -175,6 +175,22 @@ class TraceAssemblyWiringTests(TestCase):
         self.assertContains(response, '1 trace')
         self.assertContains(response, 'data-material-label="Wire 2x6 - Stud - 10 ft"')
 
+    def test_material_summary_rows_render_visibility_toggle(self):
+        # Linked rows carry the eye toggle that shows/hides their traces on
+        # the canvas; the material list doubles as the visibility sidebar.
+        self.client.force_login(self.user)
+        self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'line', 'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}],
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+            }),
+            content_type='application/json',
+        )
+        summary_url = reverse('estimating:estimate-material-summary', args=[self.estimate.pk])
+        response = self.client.get(summary_url)
+        self.assertContains(response, 'mat-vis-toggle')
+
     def test_material_summary_can_limit_rows_to_current_page(self):
         other_page = make_plan_page(self.project, label='Second Page')
         other_page.scale_pixels_per_foot = Decimal('30')

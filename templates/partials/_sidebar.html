@@ -12,6 +12,9 @@
         <a class="rail-link {% if request.resolver_match.app_name == 'estimating' %}is-active{% endif %}" href="{% url 'estimating:library' %}">
             <i class="bi bi-collection"></i><span>Library</span>
         </a>
+        <a class="rail-link {% if request.resolver_match.app_name == 'billing' %}is-active{% endif %}" href="{% url 'billing:overview' %}">
+            <i class="bi bi-credit-card"></i><span>Billing</span>
+        </a>
         <a class="rail-link {% if request.resolver_match.url_name == 'template-library' or request.resolver_match.url_name == 'template-create' or request.resolver_match.url_name == 'template-update' or request.resolver_match.url_name == 'template-delete' %}is-active{% endif %}" href="{% url 'projects:template-library' %}">
             <i class="bi bi-journal-text"></i><span>Templates</span>
         </a>

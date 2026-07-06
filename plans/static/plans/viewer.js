@@ -159,6 +159,7 @@ document.addEventListener('DOMContentLoaded', function () {
         canvas.setHeight(imageNaturalHeight);
         canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
         initialTraces.forEach(drawTrace);
+        applyMaterialVisibility();
         applyInitialZoom();
         focusRequestedTrace();
     });
@@ -182,11 +183,84 @@ document.addEventListener('DOMContentLoaded', function () {
                 document.getElementById('material-list-content').innerHTML = html;
                 syncMaterialListSelection();
                 updateMaterialToolbarState();
+                applyMaterialVisibility();
             })
             .catch(function () { /* not on the critical path - the panel just stays stale */ });
     }
     refreshMaterialList();
     updateMaterialToolbarState();
+
+    // ------------------------------------------- material visibility toggles
+    // The material list doubles as the visibility sidebar: each linked row has
+    // an eye toggle that shows/hides its traces on the canvas. Hidden state is
+    // keyed by the row's material label + category (stable across the partial
+    // re-render that follows every trace change) and kept in sessionStorage per
+    // page, like zoom. A trace linked from several rows (one wall feeds studs
+    // AND plates rows) hides while ANY of its rows is hidden; visibility is
+    // recomputed from scratch each time, so toggles can never drift.
+    var HIDDEN_MATERIALS_KEY = 'plan-viewer-hidden-materials:' + (PAGE_ID || '0');
+    var hiddenMaterialKeys = new Set();
+    try {
+        JSON.parse(window.sessionStorage.getItem(HIDDEN_MATERIALS_KEY) || '[]')
+            .forEach(function (key) { hiddenMaterialKeys.add(key); });
+    } catch (e) { /* fresh session */ }
+
+    function materialVisibilityKey(row) {
+        return (row.dataset.materialLabel || '') + '|' + (row.dataset.categoryLabel || '');
+    }
+
+    function persistHiddenMaterials() {
+        try {
+            window.sessionStorage.setItem(
+                HIDDEN_MATERIALS_KEY, JSON.stringify(Array.from(hiddenMaterialKeys))
+            );
+        } catch (e) { /* storage unavailable */ }
+    }
+
+    function applyMaterialVisibility() {
+        var hiddenTraceIds = {};
+        document.querySelectorAll('#material-list-content .material-summary-row').forEach(function (row) {
+            var key = materialVisibilityKey(row);
+            var isHidden = hiddenMaterialKeys.has(key);
+            row.classList.toggle('is-material-hidden', isHidden);
+            var icon = row.querySelector('.mat-vis-toggle i');
+            if (icon) {
+                icon.className = isHidden ? 'bi bi-eye-slash' : 'bi bi-eye';
+            }
+            if (isHidden) {
+                parseTraceIds(row.dataset.traceIds).forEach(function (traceId) {
+                    hiddenTraceIds[traceId] = true;
+                });
+            }
+        });
+        canvas.getObjects().forEach(function (obj) {
+            if (obj.traceId) {
+                obj.visible = !hiddenTraceIds[obj.traceId];
+            }
+        });
+        canvas.requestRenderAll();
+    }
+
+    document.getElementById('material-list-content').addEventListener('click', function (event) {
+        var toggle = event.target.closest('.mat-vis-toggle');
+        if (!toggle) {
+            return;
+        }
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        var row = toggle.closest('.material-summary-row');
+        if (!row) {
+            return;
+        }
+        var key = materialVisibilityKey(row);
+        if (hiddenMaterialKeys.has(key)) {
+            hiddenMaterialKeys.delete(key);
+        } else {
+            hiddenMaterialKeys.add(key);
+        }
+        persistHiddenMaterials();
+        applyMaterialVisibility();
+    });
 
     document.getElementById('material-list-content').addEventListener('click', function (event) {
         var row = event.target.closest('.material-summary-row');
@@ -414,7 +488,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // polyline exactly like a line wall (see plans/framing.py,
     // estimating/calculations.py), so this is purely a drawing-UX change.
     var SEMANTIC_TOOLS = {
-        wall: { toolType: 'polyline', label: 'Wall', settingsFields: ['stud-spacing', 'wall-height', 'plate-counts', 'wall-layers'] },
+        wall: { toolType: 'polyline', label: 'Wall', settingsFields: ['stud-spacing', 'wall-height', 'plate-counts'] },
         opening: { toolType: 'opening', label: 'Opening', settingsFields: ['opening-type', 'opening-size', 'stud-spacing'] },
         beam: { toolType: 'line', label: 'Beam', settingsFields: [] },
         joist: { toolType: 'area', label: 'Joist', settingsFields: ['spacing', 'direction'] },
@@ -2038,7 +2112,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var h = opening.rough_height_in * heightScale;
             svg.push('<rect x="' + x.toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + w.toFixed(2) + '" height="' + h.toFixed(2) + '" fill="rgba(180,220,255,0.28)" stroke="#0d6efd" stroke-width="1.2" stroke-dasharray="6 4"/>');
         });
-        svg.push('<text x="' + x0 + '" y="' + (height - 18) + '" font-size="12" fill="#5c4033">Pseudo-3D framing preview — member edits update this view live.</text>');
+        svg.push('<text x="' + x0 + '" y="' + (height - 18) + '" font-size="12" fill="#5c4033">Pseudo-3D framing preview - member edits update this view live.</text>');
         svg.push('</svg>');
         return svg.join('');
     }

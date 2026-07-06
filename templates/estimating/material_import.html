@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}Import Materials{% endblock %}
+{% block topbar_title %}Import Materials{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <a class="text-muted small" href="{% url 'estimating:library' %}"><i class="bi bi-arrow-left"></i> Library</a>
+        <h1 class="page-title">Import materials</h1>
+        <p class="page-subtitle">Bring in a supplier or manufacturer list (Simpson, USP, your yard's price file) as CSV or XLSX.</p>
+    </div>
+</div>
+
+<div class="card p-4 mb-4" style="max-width: 720px;">
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="import-file" class="form-label fw-semibold">CSV or XLSX file</label>
+            <input type="file" id="import-file" name="file" class="form-control" accept=".csv,.xlsx" required>
+        </div>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Import into my library</button>
+    </form>
+</div>
+
+<div class="card p-4" style="max-width: 720px;">
+    <h2 class="h6 fw-bold">File format</h2>
+    <p class="text-muted small mb-2">First row is the header. Column names are case-insensitive; only <code>name</code> is required. Rows already in your library (by name) are skipped, so re-importing an updated file is safe.</p>
+    <div class="table-responsive">
+        <table class="table table-sm data-table mb-2">
+            <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+            <tbody>
+                <tr><td><code>name</code></td><td>Product name, e.g. "Simpson LUS26 Joist Hanger" (required)</td></tr>
+                <tr><td><code>category</code></td><td>Library group key or label, e.g. "connectors" or "Connectors &amp; Hardware"</td></tr>
+                <tr><td><code>species</code> / <code>grade</code> / <code>dimension</code></td><td>Brand, series, and what it fits; shown on the material card</td></tr>
+                <tr><td><code>input_type</code></td><td><code>each</code> (default), <code>box</code>, or <code>ft</code></td></tr>
+                <tr><td><code>quantity_per_box</code></td><td>Required for <code>box</code> items</td></tr>
+                <tr><td><code>lengths</code></td><td>For <code>ft</code> items: stock lengths in feet, e.g. "8;10;12;16"</td></tr>
+                <tr><td><code>default_length</code></td><td>Which stock length quantities default to (first length if omitted)</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted small mb-0">Example row: <code>Simpson LUS28 Joist Hanger, connectors, Simpson Strong-Tie, LUS, 2x8, each</code></p>
+</div>
+{% endblock %}

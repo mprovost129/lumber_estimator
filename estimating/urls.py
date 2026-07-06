@@ -8,6 +8,7 @@ urlpatterns = [
     path('library/', views.LibraryView.as_view(), name='library'),
     path('library/formulas/new/', views.FormulaCreateView.as_view(), name='formula-create'),
     path('library/assemblies/new/', views.AssemblyCreateView.as_view(), name='assembly-create'),
+    path('library/materials/import/', views.MaterialImportView.as_view(), name='material-import'),
     path(
         'library/assemblies/<int:pk>/quick-edit/', views.AssemblyQuickEditView.as_view(),
         name='assembly-quick-edit',
