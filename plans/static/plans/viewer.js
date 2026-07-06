@@ -504,7 +504,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // whenever a raw tool button is used instead.
     var activeSemanticKey = null;
 
-    document.querySelectorAll('#tool-sidebar .tool-btn[data-tool]').forEach(function (button) {
+    document.querySelectorAll('.tool-btn[data-tool]').forEach(function (button) {
         button.addEventListener('click', function () {
             var tool = button.dataset.tool;
             var wasActive = activeTool === tool && button.classList.contains('active');
@@ -575,7 +575,7 @@ document.addEventListener('DOMContentLoaded', function () {
             variantFilter = null;
             variantLabel = null;
             settingsFieldsOverride = null;
-            sourceButton = document.querySelector('#tool-sidebar .tool-btn[data-tool="calibrate"]');
+            sourceButton = document.querySelector('.tool-btn[data-tool="calibrate"]');
         }
         // Any activation (guarded redirect, direct tool pick, or deactivate)
         // replaces the pending re-arm, so switching tools or hitting Escape
@@ -588,7 +588,7 @@ document.addEventListener('DOMContentLoaded', function () {
         activeTool = tool;
         activeVariantFilter = variantFilter || null;
 
-        document.querySelectorAll('#tool-sidebar .tool-btn, #tool-sidebar .dropdown-item').forEach(function (button) {
+        document.querySelectorAll('.tool-btn, #tool-sidebar .dropdown-item').forEach(function (button) {
             button.classList.remove('active');
         });
         if (sourceButton) {

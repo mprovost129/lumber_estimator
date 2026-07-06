@@ -81,6 +81,11 @@
     .wall-member-grip { cursor: pointer; }
     .wall-edit-toolbar .active { box-shadow: inset 0 0 0 2px rgba(58,124,165,.35); }
     .wall-help-badge { font-size: .75rem; }
+    .viewer-page-tools { display: flex; align-items: center; gap: 0.5rem; }
+    .viewer-page-tools .tool-btn {
+        width: 38px; height: 38px; padding: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
 </style>
 {% endblock %}
 
@@ -94,9 +99,14 @@
             <i class="bi bi-pencil"></i>
         </button>
     </h1>
-    <span id="calibration-status" class="badge rounded-pill {% if is_calibrated %}badge-status-active{% else %}badge-status-archived{% endif %}">
-        {% if is_calibrated %}Calibrated{% else %}Not calibrated{% endif %}
-    </span>
+    <div class="viewer-page-tools no-print">
+        <button type="button" class="tool-btn btn btn-outline-secondary viewer-header-tool" data-tool="calibrate" title="Calibrate Scale">
+            <i class="bi bi-rulers"></i>
+        </button>
+        <span id="calibration-status" class="badge rounded-pill {% if is_calibrated %}badge-status-active{% else %}badge-status-archived{% endif %}">
+            {% if is_calibrated %}Calibrated{% else %}Not calibrated{% endif %}
+        </span>
+    </div>
 </div>
 <p class="project-card-meta mb-3">
     <a href="{% url 'projects:detail' project.pk %}">&larr; Back to {{ project.name }}</a>
@@ -192,9 +202,6 @@
         </button>
         <button type="button" class="tool-btn btn btn-outline-secondary" data-tool="hand" title="Pan / Hand Tool (H)">
             <i class="bi bi-hand-index"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-secondary" data-tool="calibrate" title="Calibrate Scale">
-            <i class="bi bi-rulers"></i>
         </button>
         <button type="button" class="tool-btn btn btn-outline-danger" id="delete-selected" title="Delete Selected">
             <i class="bi bi-trash"></i>
