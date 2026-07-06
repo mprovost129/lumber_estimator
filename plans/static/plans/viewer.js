@@ -1409,14 +1409,11 @@ document.addEventListener('DOMContentLoaded', function () {
             onTraceSelected();
             return;
         }
-        selectedTrace = null;
-        showPanel('none');
-        var selection = new fabric.ActiveSelection(matches, { canvas: canvas });
         canvas.discardActiveObject();
-        canvas.setActiveObject(selection);
+        selectedTrace = null;
         linkedTraceIds = traceIds.slice();
         syncMaterialListSelection();
-        canvas.requestRenderAll();
+        showPanel('none');
         scrollCanvasObjectsIntoView(matches);
     }
 
@@ -1429,6 +1426,16 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             row.classList.toggle('is-linked', Boolean(isLinked));
         });
+        refreshLinkedTraceStyling();
+    }
+
+    function refreshLinkedTraceStyling() {
+        canvas.getObjects().forEach(function (obj) {
+            if (obj.traceId) {
+                restyleTrace(obj);
+            }
+        });
+        canvas.requestRenderAll();
     }
 
     function scrollCanvasObjectsIntoView(objects) {
@@ -2177,19 +2184,21 @@ document.addEventListener('DOMContentLoaded', function () {
     function restyleTrace(obj) {
         var config = TOOLS[obj.traceToolType] || TOOLS.line;
         var color = obj.traceColor || (obj.traceAssemblyId ? config.activeColor : config.color);
+        var isLinked = linkedTraceIds.indexOf(obj.traceId) !== -1;
+        var lineWidth = isLinked ? 7 : 4;
+        var fillAlpha = isLinked ? 0.28 : 0.18;
         if (obj.traceToolType === 'area' || obj.traceToolType === 'polyline') {
-            obj.set({ stroke: color, fill: hexToRgba(color, 0.18) });
+            obj.set({ stroke: color, strokeWidth: lineWidth, fill: hexToRgba(color, fillAlpha) });
             if (obj.traceToolType === 'polyline' && !(obj.traceSettings || {}).closed) {
                 obj.set({ fill: '' });
             }
         } else if (obj.traceToolType === 'count') {
             obj.getObjects().forEach(function (circle) {
-                circle.set({ stroke: color, fill: hexToRgba(color, 0.6) });
+                circle.set({ stroke: color, strokeWidth: isLinked ? 4 : 2, fill: hexToRgba(color, isLinked ? 0.8 : 0.6) });
             });
         } else {
-            obj.set({ stroke: color });
+            obj.set({ stroke: color, strokeWidth: obj.traceToolType === 'opening' ? (isLinked ? 8 : 6) : lineWidth });
         }
-        canvas.requestRenderAll();
     }
 
     function hexToRgba(hex, alpha) {
