@@ -1,9 +1,39 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Home{% endblock %}
-{% block meta_description %}Welcome to the site.{% endblock %}
+{% block title %}Lumber Estimator{% endblock %}
+{% block meta_description %}Trace plans and generate lumber material lists.{% endblock %}
 
 {% block content %}
-<h1>Welcome</h1>
+<div class="hero-panel text-center">
+    <i class="bi bi-rulers" style="font-size: 2.5rem; color: var(--brand-steel-blue);"></i>
+    <h1 class="mt-3">Lumber Estimator</h1>
+    <p class="project-card-meta mb-4" style="max-width: 480px; margin-inline: auto;">
+        Upload a plan, trace walls and openings, and generate an accurate lumber material list
+        - ready for your supplier.
+    </p>
+    {% if user.is_authenticated %}
+    <a class="btn btn-primary" href="{% url 'projects:dashboard' %}"><i class="bi bi-kanban"></i> Go to Dashboard</a>
+    {% else %}
+    <a class="btn btn-primary" href="{% url 'login' %}"><i class="bi bi-box-arrow-in-right"></i> Log In</a>
+    {% endif %}
+</div>
+
+<div class="project-card-grid mt-4">
+    <div class="info-card">
+        <i class="bi bi-file-earmark-pdf" style="font-size: 1.5rem; color: var(--brand-steel-blue);"></i>
+        <div class="project-card-title mt-2">Upload Plans</div>
+        <div class="project-card-meta">Drop in a PDF or image and it's split into labeled, calibrated pages.</div>
+    </div>
+    <div class="info-card">
+        <i class="bi bi-bricks" style="font-size: 1.5rem; color: var(--brand-steel-blue);"></i>
+        <div class="project-card-title mt-2">Trace Elements</div>
+        <div class="project-card-meta">Draw walls, floors, roofs, and openings directly on the plan.</div>
+    </div>
+    <div class="info-card">
+        <i class="bi bi-list-check" style="font-size: 1.5rem; color: var(--brand-steel-blue);"></i>
+        <div class="project-card-title mt-2">Generate a Material List</div>
+        <div class="project-card-meta">Assign an assembly and get a supplier-ready quantity takeoff.</div>
+    </div>
+</div>
 {% endblock %}

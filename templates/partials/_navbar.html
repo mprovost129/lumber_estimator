@@ -1,0 +1,11 @@
+<header class="app-topbar">
+    <button class="topbar-menu-btn" id="rail-toggle" type="button" aria-label="Toggle menu">
+        <i class="bi bi-list"></i>
+    </button>
+    <div class="topbar-title">{% block topbar_title %}{% endblock %}</div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-user">
+        <span class="topbar-avatar">{{ user.email|first|upper }}</span>
+        <span class="topbar-email d-none d-md-inline">{{ user.email }}</span>
+    </div>
+</header>

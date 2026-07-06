@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+
+{% block title %}New Formula{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="{% url 'estimating:library' %}">&larr; Back to library</a>
+    <h1 class="h2 mt-2">New formula</h1>
+    <p class="text-muted">Start with a plan measurement or build on an existing formula.</p>
+</div>
+
+<form method="post" class="card">
+    {% csrf_token %}
+    <div class="card-body">
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3">
+        {% for field in form %}
+            <div class="{% if field.name == 'description' %}col-12{% else %}col-md-6{% endif %}">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+    <div class="card-footer d-flex justify-content-end gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'estimating:library' %}">Cancel</a>
+        <button class="btn btn-primary" type="submit">Create formula</button>
+    </div>
+</form>
+{% endblock %}

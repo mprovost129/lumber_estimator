@@ -1,4 +1,5 @@
 import math
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -22,6 +23,25 @@ class MaterialProduct(models.Model):
         BOX = 'box', 'Box'
         EACH = 'each', 'Each'
 
+    class Category(models.TextChoices):
+        """Catalog grouping by material type, used to organize the material
+        library. Distinct from a LineItem's construction-system category."""
+        DIMENSIONAL = 'dimensional', 'Dimensional Lumber'
+        PRESSURE_TREATED = 'pressure_treated', 'Pressure-Treated'
+        STUDS = 'studs', 'Studs & Precut'
+        BOARDS = 'boards', 'Boards & Trim'
+        ENGINEERED = 'engineered', 'Engineered Lumber'
+        SHEATHING = 'sheathing', 'Sheathing & Panels'
+        SUBFLOOR = 'subfloor', 'Subfloor & Underlayment'
+        ROOFING = 'roofing', 'Roofing'
+        SIDING = 'siding', 'Siding & Exterior Finish'
+        WEATHER_BARRIER = 'weather_barrier', 'Housewrap & Weather Barrier'
+        CONNECTORS = 'connectors', 'Connectors & Hardware'
+        FASTENERS = 'fasteners', 'Fasteners & Adhesive'
+        DECKING = 'decking', 'Decking & Railing'
+        CONCRETE_MISC = 'concrete_misc', 'Concrete & Miscellaneous'
+        UNCATEGORIZED = 'uncategorized', 'Uncategorized'
+
     account = models.ForeignKey(
         Account, on_delete=models.CASCADE, null=True, blank=True,
         related_name='custom_materials',
@@ -29,6 +49,10 @@ class MaterialProduct(models.Model):
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, blank=True)
+    category = models.CharField(
+        max_length=30, choices=Category.choices, default=Category.UNCATEGORIZED,
+        help_text='Catalog grouping used to organize the material library.',
+    )
     species = models.CharField(max_length=50, blank=True)
     grade = models.CharField(max_length=50, blank=True)
     nominal_dimension = models.CharField(max_length=20, blank=True)
@@ -82,14 +106,57 @@ class MaterialProduct(models.Model):
             raise ValueError(f'No stock length of {self} covers {required_length_ft} ft.')
         return length.length_ft
 
+    @property
+    def default_length_ft(self):
+        """The stock length used for total-length / default-length quantity
+        calculations (e.g. how many plate pieces cover a wall run). Feet materials only."""
+        if self.input_type != self.InputType.FT:
+            raise ValueError(f'{self} is not a feet-input material.')
+        default = self.lengths.filter(is_default=True).first()
+        if default is None:
+            raise ValueError(f'{self} has no default stock length set.')
+        return default.length_ft
+
+    @property
+    def max_length_ft(self):
+        """The longest in-stock length. Feet materials only. Used to decide
+        whether a member has to be spliced from more than one stock piece."""
+        if self.input_type != self.InputType.FT:
+            raise ValueError(f'{self} is not a feet-input material.')
+        longest = self.lengths.order_by('-length_ft').first()
+        if longest is None:
+            raise ValueError(f'{self} has no stock lengths set.')
+        return longest.length_ft
+
+    def pieces_for_length(self, required_length_ft):
+        """Stock pieces needed to build ONE member of `required_length_ft`,
+        splicing end to end when it is longer than the longest stock piece.
+        Returns (piece_count, piece_length_ft). Feet materials only.
+
+        A member that fits in a single stock length returns (1, smallest
+        covering length) - the same choice stock_length_for() makes. A longer
+        member is built from full-length pieces of the longest stock, so it
+        returns (ceil(required / max_stock), max_stock). Splice laps are not
+        modeled here; cover them with the rule's waste_factor."""
+        required = Decimal(str(required_length_ft))
+        max_len = self.max_length_ft
+        if required <= max_len:
+            return 1, self.stock_length_for(required)
+        return math.ceil(required / max_len), max_len
+
 
 class MaterialLength(models.Model):
     """One in-stock length for an input_type=FT MaterialProduct. `is_default`
     marks the length used for total-length / default-length quantity calculations.
-    The program can only ever use lengths that appear here."""
+    The program can only ever use lengths that appear here.
+
+    Decimal (not whole feet) so precut stud lengths - e.g. 92-5/8 in and
+    104-5/8 in, the standard precuts for 8'-1-1/8" and 9'-1-1/8" wall
+    heights - can be stored exactly: 92.625 in / 12 = 7.71875 ft,
+    104.625 in / 12 = 8.71875 ft, both exact at 5 decimal places."""
 
     product = models.ForeignKey(MaterialProduct, on_delete=models.CASCADE, related_name='lengths')
-    length_ft = models.PositiveSmallIntegerField()
+    length_ft = models.DecimalField(max_digits=8, decimal_places=5)
     is_default = models.BooleanField(default=False)
 
     class Meta:
@@ -103,7 +170,14 @@ class MaterialLength(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.product.name} - {self.length_ft} ft'
+        # length_ft may still be a plain int/float here (Django only coerces a
+        # DecimalField to Decimal on load from the DB, not on assignment), so
+        # go through Decimal(str(...)) before .normalize() (which strips
+        # trailing zeros - 7.71875 stays exact, 10.00000 -> 10 - but can render
+        # round numbers in scientific notation, e.g. 10 -> '1E+1', hence the
+        # format(..., 'f') to force fixed-point instead of str()/f-string).
+        length = Decimal(str(self.length_ft)).normalize()
+        return f'{self.product.name} - {format(length, "f")} ft'
 
     def clean(self):
         if self.product_id and self.product.input_type != MaterialProduct.InputType.FT:

@@ -2,13 +2,300 @@
 {% load static %}
 
 {% block title %}New Project{% endblock %}
-{% block meta_description %}Start a new project.{% endblock %}
+{% block meta_description %}Set up a new project.{% endblock %}
+
+{% block extra_css %}
+<style>
+    .template-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .template-card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: var(--shadow-sm);
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+        cursor: pointer;
+        transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.12s ease;
+    }
+    .template-card:hover {
+        border-color: var(--primary-line);
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+    }
+    .template-card.is-selected {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+        box-shadow: 0 0 0 2px var(--primary-soft);
+    }
+    .template-card-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    .template-card-meta {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        margin: 0;
+    }
+    .wizard-step { display: none; }
+    .wizard-step.active { display: block; }
+    .wizard-progress .step-dot {
+        width: 28px; height: 28px; border-radius: 50%;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: var(--border); color: var(--text-muted); font-weight: 600;
+    }
+    .wizard-progress .step-dot.done { background: var(--primary); color: var(--bs-white); }
+</style>
+{% endblock %}
 
 {% block content %}
-<h1>New Project</h1>
-<form method="post">
+<div class="page-head">
+    <div>
+        <h1 class="page-title">New Project</h1>
+        <p class="page-subtitle">Start with a saved template to reduce setup clicks, or enter custom values below.</p>
+    </div>
+    <div class="page-head-actions">
+        <a class="btn btn-outline-primary" href="{% url 'projects:template-library' %}"><i class="bi bi-journal-text"></i> Manage Templates</a>
+    </div>
+</div>
+
+{% if project_templates %}
+<div class="card p-3 mb-4">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+        <div>
+            <h2 class="h5 mb-1">Start From a Template</h2>
+            <p class="project-card-meta mb-0">Pick a starter profile and we'll prefill the structure and framing defaults for this job.</p>
+        </div>
+    </div>
+    <div class="template-grid">
+        {% for template_option in project_templates %}
+        <button type="button"
+                class="template-card text-start {% if selected_template and selected_template.pk == template_option.pk %}is-selected{% endif %}"
+                data-template-card
+                data-template-id="{{ template_option.pk }}"
+                data-template-name="{{ template_option.name }}"
+                data-template-description="{{ template_option.description }}"
+                data-num-floors="{{ template_option.num_floors }}"
+                data-foundation-type="{{ template_option.foundation_type }}"
+                data-basement-wall-height="{{ template_option.basement_wall_height_in|default_if_none:'' }}"
+                data-first-floor-height="{{ template_option.first_floor_wall_height_in }}"
+                data-second-floor-height="{{ template_option.second_floor_wall_height_in|default_if_none:'' }}"
+                data-stud-spacing="{{ template_option.stud_spacing_in }}"
+                data-roof-framing="{{ template_option.roof_framing }}"
+                data-roof-pitch="{{ template_option.roof_pitch_rise_per_12|default_if_none:'' }}"
+                data-floor-material="{{ template_option.floor_material }}"
+                data-siding-material="{{ template_option.siding_material }}">
+            <div class="d-flex align-items-start justify-content-between gap-2">
+                <h3 class="template-card-title">{{ template_option.name }}</h3>
+                {% if template_option.is_system %}<span class="pill"><i class="bi bi-stars"></i> Starter</span>{% endif %}
+            </div>
+            {% if template_option.description %}
+            <p class="template-card-meta">{{ template_option.description }}</p>
+            {% endif %}
+            <div class="d-flex flex-wrap gap-2">
+                <span class="tag">{{ template_option.num_floors }} floor{{ template_option.num_floors|pluralize }}</span>
+                <span class="tag">{{ template_option.first_floor_wall_height_in }} in 1st</span>
+                {% if template_option.second_floor_wall_height_in %}<span class="tag">{{ template_option.second_floor_wall_height_in }} in 2nd</span>{% endif %}
+            </div>
+        </button>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="wizard-progress d-flex align-items-center gap-2 mb-4">
+    <span class="step-dot done" data-step-dot="1">1</span><span class="small">Project</span>
+    <span class="text-muted">&mdash;</span>
+    <span class="step-dot" data-step-dot="2">2</span><span class="small">Structure</span>
+    <span class="text-muted">&mdash;</span>
+    <span class="step-dot" data-step-dot="3">3</span><span class="small">Framing</span>
+</div>
+
+<form method="post" id="setup-wizard" class="card p-3" style="max-width: 540px;">
     {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit" class="btn btn-primary">Create Project</button>
+    {{ form.non_field_errors }}
+    {{ form.template }}
+
+    <fieldset class="wizard-step active" data-step="1">
+        <legend class="h5">Project</legend>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.name.id_for_label }}">Project name</label>
+            {{ form.name }}{{ form.name.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.client.id_for_label }}">Client</label>
+            {{ form.client }}{{ form.client.errors }}
+        </div>
+    </fieldset>
+
+    <fieldset class="wizard-step" data-step="2">
+        <legend class="h5">Structure</legend>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.num_floors.id_for_label }}">{{ form.num_floors.label }}</label>
+            {{ form.num_floors }}{{ form.num_floors.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.foundation_type.id_for_label }}">{{ form.foundation_type.label }}</label>
+            {{ form.foundation_type }}
+            <div class="form-text">{{ form.foundation_type.help_text }}</div>
+            {{ form.foundation_type.errors }}
+        </div>
+        <div class="mb-3" id="basement-height-field">
+            <label class="form-label" for="{{ form.basement_wall_height_in.id_for_label }}">{{ form.basement_wall_height_in.label }}</label>
+            {{ form.basement_wall_height_in }}{{ form.basement_wall_height_in.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.first_floor_wall_height_in.id_for_label }}">{{ form.first_floor_wall_height_in.label }}</label>
+            {{ form.first_floor_wall_height_in }}
+            <div class="form-text">{{ form.first_floor_wall_height_in.help_text }}</div>
+            {{ form.first_floor_wall_height_in.errors }}
+        </div>
+        <div class="mb-3" id="second-floor-height-field">
+            <label class="form-label" for="{{ form.second_floor_wall_height_in.id_for_label }}">{{ form.second_floor_wall_height_in.label }}</label>
+            {{ form.second_floor_wall_height_in }}{{ form.second_floor_wall_height_in.errors }}
+        </div>
+    </fieldset>
+
+    <fieldset class="wizard-step" data-step="3">
+        <legend class="h5">Framing</legend>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.stud_spacing_in.id_for_label }}">{{ form.stud_spacing_in.label }}</label>
+            {{ form.stud_spacing_in }}{{ form.stud_spacing_in.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.roof_framing.id_for_label }}">{{ form.roof_framing.label }}</label>
+            {{ form.roof_framing }}{{ form.roof_framing.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.roof_pitch_rise_per_12.id_for_label }}">{{ form.roof_pitch_rise_per_12.label }}</label>
+            {{ form.roof_pitch_rise_per_12 }}
+            <div class="form-text">{{ form.roof_pitch_rise_per_12.help_text }}</div>
+            {{ form.roof_pitch_rise_per_12.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.floor_material.id_for_label }}">{{ form.floor_material.label }}</label>
+            {{ form.floor_material }}
+            <div class="form-text">{{ form.floor_material.help_text }}</div>
+            {{ form.floor_material.errors }}
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.siding_material.id_for_label }}">{{ form.siding_material.label }}</label>
+            {{ form.siding_material }}
+            <div class="form-text">{{ form.siding_material.help_text }}</div>
+            {{ form.siding_material.errors }}
+        </div>
+    </fieldset>
+
+    <div class="d-flex gap-2 mt-4">
+        <button type="button" class="btn btn-outline-secondary" id="wizard-back" style="display: none;">Back</button>
+        <button type="button" class="btn btn-primary" id="wizard-next">Next</button>
+        <button type="submit" class="btn btn-success" id="wizard-submit" style="display: none;">Create Project</button>
+    </div>
 </form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+    var steps = Array.prototype.slice.call(document.querySelectorAll('.wizard-step'));
+    var dots = Array.prototype.slice.call(document.querySelectorAll('[data-step-dot]'));
+    var backButton = document.getElementById('wizard-back');
+    var nextButton = document.getElementById('wizard-next');
+    var submitButton = document.getElementById('wizard-submit');
+    var templateInput = document.getElementById('id_template');
+    var templateCards = Array.prototype.slice.call(document.querySelectorAll('[data-template-card]'));
+    var current = 0;
+
+    // Land on the first step containing a server-side validation error.
+    steps.forEach(function (step, index) {
+        if (step.querySelector('.errorlist') && current === 0) {
+            current = index;
+        }
+    });
+
+    function render() {
+        steps.forEach(function (step, index) {
+            step.classList.toggle('active', index === current);
+        });
+        dots.forEach(function (dot, index) {
+            dot.classList.toggle('done', index <= current);
+        });
+        backButton.style.display = current === 0 ? 'none' : '';
+        nextButton.style.display = current === steps.length - 1 ? 'none' : '';
+        submitButton.style.display = current === steps.length - 1 ? '' : 'none';
+    }
+
+    function stepIsValid() {
+        var inputs = steps[current].querySelectorAll('input, select, textarea');
+        for (var i = 0; i < inputs.length; i++) {
+            if (!inputs[i].checkValidity()) {
+                inputs[i].reportValidity();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    nextButton.addEventListener('click', function () {
+        if (!stepIsValid()) { return; }
+        current = Math.min(current + 1, steps.length - 1);
+        render();
+    });
+    backButton.addEventListener('click', function () {
+        current = Math.max(current - 1, 0);
+        render();
+    });
+
+    // Conditional fields
+    var floors = document.getElementById('id_num_floors');
+    var foundation = document.getElementById('id_foundation_type');
+    var basementField = document.getElementById('basement-height-field');
+    var secondFloorField = document.getElementById('second-floor-height-field');
+
+    function toggleConditionals() {
+        basementField.style.display = foundation.value === 'full_basement' ? '' : 'none';
+        secondFloorField.style.display = (parseInt(floors.value, 10) || 1) >= 2 ? '' : 'none';
+    }
+    floors.addEventListener('input', toggleConditionals);
+    foundation.addEventListener('change', toggleConditionals);
+
+    function setFieldValue(id, value) {
+        var input = document.getElementById(id);
+        if (!input) { return; }
+        input.value = value;
+    }
+
+    templateCards.forEach(function (card) {
+        card.addEventListener('click', function () {
+            templateCards.forEach(function (item) { item.classList.remove('is-selected'); });
+            card.classList.add('is-selected');
+            if (templateInput) {
+                templateInput.value = card.dataset.templateId;
+            }
+            setFieldValue('id_num_floors', card.dataset.numFloors);
+            setFieldValue('id_foundation_type', card.dataset.foundationType);
+            setFieldValue('id_basement_wall_height_in', card.dataset.basementWallHeight);
+            setFieldValue('id_first_floor_wall_height_in', card.dataset.firstFloorHeight);
+            setFieldValue('id_second_floor_wall_height_in', card.dataset.secondFloorHeight);
+            setFieldValue('id_stud_spacing_in', card.dataset.studSpacing);
+            setFieldValue('id_roof_framing', card.dataset.roofFraming);
+            setFieldValue('id_roof_pitch_rise_per_12', card.dataset.roofPitch);
+            setFieldValue('id_floor_material', card.dataset.floorMaterial);
+            setFieldValue('id_siding_material', card.dataset.sidingMaterial);
+            toggleConditionals();
+        });
+    });
+
+    toggleConditionals();
+    render();
+})();
+</script>
 {% endblock %}

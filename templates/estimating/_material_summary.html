@@ -1,0 +1,39 @@
+{% if totals.total_pieces %}
+<div class="mat-summary-stats">
+    <div class="mat-stat">
+        <span class="mat-stat-num">{{ totals.total_pieces }}</span>
+        <span class="mat-stat-label">pieces</span>
+    </div>
+    <div class="mat-stat">
+        <span class="mat-stat-num">{{ totals.row_count }}</span>
+        <span class="mat-stat-label">order lines</span>
+    </div>
+    <div class="mat-stat">
+        <span class="mat-stat-num">{{ totals.framing_bf|floatformat:0 }}</span>
+        <span class="mat-stat-label">framing BF</span>
+    </div>
+</div>
+{% endif %}
+{% regroup order_list by category_label as category_groups %}
+{% if category_groups %}
+{% for group in category_groups %}
+<div class="mb-3">
+    <p class="small fw-bold mb-1">{{ group.grouper }}</p>
+    <table class="table table-sm mb-0">
+        <tbody>
+            {% for row in group.list %}
+            <tr>
+                <td>
+                    {{ row.material__name }}
+                    {% if row.length_ft %}<span class="text-muted">&middot; {{ row.length_ft|floatformat:0 }} ft</span>{% endif %}
+                </td>
+                <td class="text-end">{{ row.total_quantity }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% else %}
+<p class="text-muted small mb-0">No materials yet. Draw a trace with an assembly assigned to start building the list.</p>
+{% endif %}

@@ -4,34 +4,67 @@
 {% block title %}{{ project.name }}{% endblock %}
 {% block meta_description %}{{ project.name }} project workspace.{% endblock %}
 
+{% block topbar_title %}Project{% endblock %}
 {% block content %}
-<h1>{{ project.name }}</h1>
-<p>{{ project.client }}</p>
-
-<h2>Plans</h2>
-<form method="post" enctype="multipart/form-data" action="{% url 'plans:upload' project.pk %}">
-    {% csrf_token %}
-    <input type="file" name="original_file" accept="application/pdf" required>
-    <button type="submit" class="btn btn-secondary">Upload Plan (PDF)</button>
-</form>
-
-{% for plan in project.plans.all %}
-<h3 class="mt-4">{{ plan.name }}</h3>
-<div class="d-flex flex-wrap gap-3">
-    {% for page in plan.pages.all %}
-    <div class="text-center">
-        <a href="{% url 'plans:viewer' page.pk %}">
-            <img src="{{ page.thumbnail.url }}" alt="{{ page.display_label }}" style="max-width: 150px;">
-        </a>
-        <form method="post" action="{% url 'plans:page-label' page.pk %}" class="mt-1">
-            {% csrf_token %}
-            <input type="text" name="label" value="{{ page.label }}" placeholder="Page {{ page.page_number }}" size="15">
-            <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
-        </form>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">{{ project.name }}
+            <span class="badge rounded-pill badge-status-{{ project.status }} align-middle">{{ project.get_status_display }}</span>
+        </h1>
+        {% if project.client %}<p class="page-subtitle"><i class="bi bi-person"></i> {{ project.client }}</p>{% endif %}
     </div>
-    {% endfor %}
+</div>
+
+{% with estimate=project.estimates.first %}
+<div class="d-flex flex-wrap gap-2 mb-4">
+    <a class="btn btn-accent" href="{% url 'projects:start-takeoff' project.pk %}"><i class="bi bi-lightning-charge"></i> Start Takeoff</a>
+    {% if estimate %}
+    <a class="btn btn-primary" href="{% url 'estimating:estimate-detail' estimate.pk %}"><i class="bi bi-list-check"></i> View Material List</a>
+    <a class="btn btn-outline-primary" href="{% url 'estimating:estimate-csv' estimate.pk %}"><i class="bi bi-download"></i> Download CSV</a>
+    {% endif %}
+    <a class="btn btn-outline-secondary" href="{% url 'projects:job-settings' project.pk %}"><i class="bi bi-gear"></i> Job Settings</a>
+</div>
+{% endwith %}
+
+<div class="card p-3 mb-4">
+    <h2 class="h5 mb-3">Upload a Plan</h2>
+    <form method="post" enctype="multipart/form-data" action="{% url 'plans:upload' project.pk %}" class="d-flex flex-wrap align-items-center gap-2">
+        {% csrf_token %}
+        <input type="file" name="original_file" class="form-control" style="max-width: 360px;" accept="application/pdf,image/png,image/jpeg" required>
+        <button type="submit" class="btn btn-secondary"><i class="bi bi-upload"></i> Upload (PDF or Image)</button>
+    </form>
+</div>
+
+<h2 class="h5 mb-3">Plans</h2>
+{% for plan in project.plans.all %}
+<div class="card p-3 mb-3">
+    <h3 class="h6 mb-3"><i class="bi bi-file-earmark-pdf"></i> {{ plan.name }}</h3>
+    <div class="d-flex flex-wrap gap-3">
+        {% for page in plan.pages.all %}
+        <div class="page-thumb">
+            <a href="{% url 'plans:viewer' page.pk %}">
+                <img src="{{ page.thumbnail.url }}" alt="{{ page.display_label }}">
+            </a>
+            <form method="post" action="{% url 'plans:page-label' page.pk %}" class="mt-2 d-flex gap-1">
+                {% csrf_token %}
+                <input type="text" name="label" class="form-control form-control-sm" value="{{ page.label }}" placeholder="Page {{ page.page_number }}">
+                <button type="submit" class="btn btn-sm btn-outline-secondary">Save</button>
+            </form>
+            <form method="post" action="{% url 'plans:page-delete' page.pk %}" class="mt-1"
+                  onsubmit="return confirm('Delete {{ page.display_label|escapejs }}? This also deletes everything traced on it and cannot be undone.');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger w-100"><i class="bi bi-trash"></i> Delete Page</button>
+            </form>
+        </div>
+        {% empty %}
+        <p class="project-card-meta mb-0">No pages remaining in this plan.</p>
+        {% endfor %}
+    </div>
 </div>
 {% empty %}
-<p>No plans uploaded yet.</p>
+<div class="empty-state">
+    <i class="bi bi-file-earmark-arrow-up" style="font-size: 2rem;"></i>
+    <p class="mb-0 mt-2">No plans uploaded yet. Upload a PDF or image above to start tracing.</p>
+</div>
 {% endfor %}
 {% endblock %}

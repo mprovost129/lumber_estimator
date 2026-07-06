@@ -1,4 +1,10 @@
+from django.core.validators import RegexValidator
 from django.db import models
+
+color_validator = RegexValidator(
+    regex=r'^#[0-9A-Fa-f]{6}$',
+    message='Enter a color as a six-digit hex value, e.g. #0d6efd.',
+)
 
 
 class PlanQuerySet(models.QuerySet):
@@ -17,7 +23,7 @@ class TraceQuerySet(models.QuerySet):
 
 
 class Plan(models.Model):
-    """An uploaded PDF plan, split into PlanPages on upload."""
+    """An uploaded plan document (PDF or image), split into PlanPages on upload."""
 
     project = models.ForeignKey('projects.Project', on_delete=models.CASCADE, related_name='plans')
     original_file = models.FileField(upload_to='plans/source/%Y/%m/')
@@ -46,6 +52,10 @@ class PlanPage(models.Model):
     label = models.CharField(max_length=255, blank=True)
     image = models.ImageField(upload_to='plans/pages/%Y/%m/')
     thumbnail = models.ImageField(upload_to='plans/thumbnails/%Y/%m/')
+    scale_pixels_per_foot = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True,
+        help_text='Set by the Calibrate tool. Null means this page has not been calibrated yet.',
+    )
 
     objects = PlanPageQuerySet.as_manager()
 
@@ -69,7 +79,11 @@ class Trace(models.Model):
     never retroactively change an already-drawn Trace."""
 
     class ToolType(models.TextChoices):
-        LINE = 'line', 'Line'
+        LINE = 'line', 'Line (Wall)'
+        POLYLINE = 'polyline', 'Polyline / Polygon'
+        AREA = 'area', 'Area (Floor / Roof / Sheathing)'
+        COUNT = 'count', 'Count (Posts / Hardware)'
+        OPENING = 'opening', 'Opening (Window / Door)'
 
     plan_page = models.ForeignKey(PlanPage, on_delete=models.CASCADE, related_name='traces')
     tool_type = models.CharField(max_length=20, choices=ToolType.choices)
@@ -77,7 +91,19 @@ class Trace(models.Model):
     material = models.ForeignKey(
         'catalog.MaterialProduct', on_delete=models.PROTECT, null=True, blank=True, related_name='traces',
     )
+    assembly = models.ForeignKey(
+        'estimating.Assembly', on_delete=models.PROTECT, null=True, blank=True, related_name='traces',
+        help_text='When set, the calculation engine generates LineItems from this Trace.',
+    )
+    parent_wall = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='attached_openings',
+        help_text='For opening traces: the wall this window/door is cut into.',
+    )
     settings = models.JSONField(default=dict, blank=True)
+    color = models.CharField(
+        max_length=7, blank=True, validators=[color_validator],
+        help_text='Optional display color in #RRGGBB format.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = TraceQuerySet.as_manager()
@@ -99,6 +125,10 @@ class ToolPreset(models.Model):
         'catalog.MaterialProduct', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_presets',
     )
     settings = models.JSONField(default=dict, blank=True)
+    color = models.CharField(
+        max_length=7, blank=True, validators=[color_validator],
+        help_text='Optional display color in #RRGGBB format.',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

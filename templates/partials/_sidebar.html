@@ -1,0 +1,33 @@
+<aside class="app-rail" id="app-rail" aria-label="Primary navigation">
+    <a class="rail-brand" href="{% url 'projects:dashboard' %}">
+        <span class="rail-brand-mark"><i class="bi bi-rulers"></i></span>
+        <span class="rail-brand-text">Lumber<span>Estimator</span></span>
+    </a>
+
+    <nav class="rail-nav">
+        <div class="rail-section-label">Workspace</div>
+        <a class="rail-link {% if request.resolver_match.app_name == 'projects' and request.resolver_match.url_name != 'template-library' and request.resolver_match.url_name != 'template-create' and request.resolver_match.url_name != 'template-update' and request.resolver_match.url_name != 'template-delete' %}is-active{% endif %}" href="{% url 'projects:dashboard' %}">
+            <i class="bi bi-grid-1x2"></i><span>Projects</span>
+        </a>
+        <a class="rail-link {% if request.resolver_match.app_name == 'estimating' %}is-active{% endif %}" href="{% url 'estimating:library' %}">
+            <i class="bi bi-collection"></i><span>Library</span>
+        </a>
+        <a class="rail-link {% if request.resolver_match.url_name == 'template-library' or request.resolver_match.url_name == 'template-create' or request.resolver_match.url_name == 'template-update' or request.resolver_match.url_name == 'template-delete' %}is-active{% endif %}" href="{% url 'projects:template-library' %}">
+            <i class="bi bi-journal-text"></i><span>Templates</span>
+        </a>
+
+        <div class="rail-section-label">Get started</div>
+        <a class="rail-link" href="{% url 'projects:create' %}">
+            <i class="bi bi-plus-square"></i><span>New Project</span>
+        </a>
+        <a class="rail-link {% if request.resolver_match.url_name == 'home' %}is-active{% endif %}" href="{% url 'core:home' %}">
+            <i class="bi bi-house"></i><span>Home</span>
+        </a>
+    </nav>
+
+    <div class="rail-foot">
+        <a class="rail-link" href="{% url 'logout' %}">
+            <i class="bi bi-box-arrow-right"></i><span>Log out</span>
+        </a>
+    </div>
+</aside>

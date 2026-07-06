@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+
+{% block title %}New Assembly{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="{% url 'estimating:library' %}">&larr; Back to library</a>
+    <h1 class="h2 mt-2">New assembly</h1>
+    <p class="text-muted">Combine materials with reusable library formulas or framing rules.</p>
+</div>
+
+<form method="post" class="card">
+    {% csrf_token %}
+    <div class="card-body">
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3 mb-4">
+        {% for field in form %}
+            <div class="{% if field.name == 'description' %}col-12{% else %}col-md-6{% endif %}">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+        {% endfor %}
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h5 mb-0">Material rules</h2>
+            <button class="btn btn-sm btn-outline-primary" id="add-rule" type="button">Add rule</button>
+        </div>
+        <p class="small text-muted">
+            Choose either a library formula or a framing formula kind for each row - picking one clears
+            and locks the other. Fields specific to one formula kind (e.g. corner/T-intersection stud
+            counts for "Count by spacing", coverage for "Units by coverage area") only show up once
+            that kind is selected.
+        </p>
+        {{ rules.management_form }}
+        {% if rules.non_form_errors %}<div class="alert alert-danger">{{ rules.non_form_errors }}</div>{% endif %}
+        <div id="rule-list">
+        {% for rule_form in rules %}
+            <div class="rule-row border rounded p-3 mb-3">
+                {% for hidden in rule_form.hidden_fields %}{{ hidden }}{% endfor %}
+                {% if rule_form.non_field_errors %}<div class="alert alert-danger py-2">{{ rule_form.non_field_errors }}</div>{% endif %}
+                <div class="row g-2">
+                {% for field in rule_form.visible_fields %}
+                    <div class="{% if field.name == 'DELETE' %}col-12{% else %}col-md-4{% endif %}" data-role-field="{{ field.name }}">
+                        <label class="form-label small" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+    <div class="card-footer d-flex justify-content-end gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'estimating:library' %}">Cancel</a>
+        <button class="btn btn-primary" type="submit">Create assembly</button>
+    </div>
+</form>
+
+<template id="empty-rule">
+    <div class="rule-row border rounded p-3 mb-3">
+        {% for hidden in rules.empty_form.hidden_fields %}{{ hidden }}{% endfor %}
+        <div class="row g-2">
+        {% for field in rules.empty_form.visible_fields %}
+            <div class="{% if field.name == 'DELETE' %}col-12{% else %}col-md-4{% endif %}" data-role-field="{{ field.name }}">
+                <label class="form-label small" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('add-rule').addEventListener('click', function () {
+    const total = document.getElementById('id_rules-TOTAL_FORMS');
+    const index = Number(total.value);
+    const html = document.getElementById('empty-rule').innerHTML.replaceAll('__prefix__', index);
+    document.getElementById('rule-list').insertAdjacentHTML('beforeend', html);
+    total.value = index + 1;
+    initRuleRow(document.getElementById('rule-list').lastElementChild);
+});
+
+// Fields that only mean something for one specific formula_kind - hidden for
+// every other kind, and for rows using a library Formula instead of a
+// framing formula kind at all (e.g. a Sill Plate using "Count by stock
+// length" never needs corner/T-intersection stud counts - those are
+// per_spacing-only wall-junction fields).
+var KIND_ONLY_FIELDS = {
+    per_spacing: ['corner_stud_count', 't_intersection_stud_count', 't_backer_stud_count'],
+    per_area_coverage: ['coverage_sqft'],
+    per_box: ['units_per_measurement'],
+};
+var ALL_KIND_ONLY_FIELD_NAMES = [].concat(
+    KIND_ONLY_FIELDS.per_spacing, KIND_ONLY_FIELDS.per_area_coverage, KIND_ONLY_FIELDS.per_box,
+);
+
+function fieldWrap(row, name) {
+    return row.querySelector('[data-role-field="' + name + '"]');
+}
+
+function updateKindFields(row, kind) {
+    var visible = KIND_ONLY_FIELDS[kind] || [];
+    ALL_KIND_ONLY_FIELD_NAMES.forEach(function (name) {
+        var wrap = fieldWrap(row, name);
+        if (wrap) {
+            wrap.style.display = visible.indexOf(name) === -1 ? 'none' : '';
+        }
+    });
+}
+
+function initRuleRow(row) {
+    var formulaWrap = fieldWrap(row, 'formula');
+    var formulaKindWrap = fieldWrap(row, 'formula_kind');
+    var formulaSelect = formulaWrap && formulaWrap.querySelector('select');
+    var formulaKindSelect = formulaKindWrap && formulaKindWrap.querySelector('select');
+
+    if (formulaSelect && formulaKindSelect) {
+        formulaSelect.addEventListener('change', function () {
+            if (formulaSelect.value) {
+                formulaKindSelect.value = '';
+                formulaKindSelect.disabled = true;
+            } else {
+                formulaKindSelect.disabled = false;
+            }
+            updateKindFields(row, formulaKindSelect.value);
+        });
+        formulaKindSelect.addEventListener('change', function () {
+            if (formulaKindSelect.value) {
+                formulaSelect.value = '';
+                formulaSelect.disabled = true;
+            } else {
+                formulaSelect.disabled = false;
+            }
+            updateKindFields(row, formulaKindSelect.value);
+        });
+        // Reflect whichever side is already chosen on load (e.g. a freshly
+        // added row, or a normal existing row) - but never disable BOTH at
+        // once, since a disabled <select> can't be re-enabled by the user;
+        // a row saved before this guard existed with both set is left fully
+        // editable instead, and picking/changing either field resolves it.
+        if (formulaSelect.value && !formulaKindSelect.value) {
+            formulaKindSelect.disabled = true;
+        } else if (formulaKindSelect.value && !formulaSelect.value) {
+            formulaSelect.disabled = true;
+        }
+    }
+
+    updateKindFields(row, formulaKindSelect ? formulaKindSelect.value : '');
+}
+
+document.querySelectorAll('.rule-row').forEach(initRuleRow);
+</script>
+{% endblock %}

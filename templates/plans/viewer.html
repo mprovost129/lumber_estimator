@@ -3,103 +3,481 @@
 
 {% block title %}{{ page.display_label }} - {{ project.name }}{% endblock %}
 {% block meta_description %}Trace {{ page.display_label }}.{% endblock %}
+{% block main_class %}main-full-bleed{% endblock %}
+{% block layout_shell_class %}layout-shell--full{% endblock %}
+{% block sidebar %}{% endblock %}
 
 {% block extra_css %}
 <style>
     #plan-viewer { display: flex; gap: 1rem; align-items: flex-start; }
-    #tool-sidebar { width: 56px; display: flex; flex-direction: column; gap: 0.5rem; flex-shrink: 0; }
+    #tool-sidebar {
+        width: 56px; display: flex; flex-direction: column; gap: 0.5rem; flex-shrink: 0;
+        background-color: var(--bs-white); border: 1px solid var(--brand-gray-border);
+        border-radius: var(--bs-border-radius); padding: 0.5rem;
+    }
     #tool-sidebar .tool-btn {
         width: 44px; height: 44px; padding: 0; font-size: 1.25rem;
         display: flex; align-items: center; justify-content: center;
     }
-    #plan-canvas-wrap { border: 1px solid #ccc; overflow: auto; max-width: 65vw; max-height: 80vh; }
-    #tool-panel { min-width: 260px; }
+    #canvas-column { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    #zoom-level { min-width: 3.5em; text-align: center; }
+    #plan-canvas-wrap {
+        border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius);
+        overflow: auto; min-width: 0; height: 80vh; background-color: var(--bs-white);
+    }
+    #tool-panel {
+        width: 280px; flex-shrink: 0; background-color: var(--bs-white);
+        border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius); padding: 1rem;
+    }
+    #material-list-panel {
+        width: 300px; flex-shrink: 0; background-color: var(--bs-white);
+        border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius); padding: 1rem;
+        max-height: 80vh; overflow-y: auto;
+    }
+    #wall-elevation-modal {
+        position: fixed; inset: 5vh 5vw; z-index: 1050; background: var(--bs-white); border: 1px solid var(--brand-gray-border);
+        border-radius: var(--bs-border-radius); box-shadow: 0 1rem 3rem rgba(44,54,64,.35); padding: 1rem; display: none; overflow: auto;
+    }
+    #wall-elevation-modal.open { display: block; }
+    #wall-elevation-backdrop {
+        position: fixed; inset: 0; z-index: 1040; background: rgba(44,54,64,.35); display: none;
+    }
+    #wall-elevation-backdrop.open { display: block; }
+    #wall-elevation-svg, #wall-3d-svg {
+        width: 100%; min-width: 720px; height: auto;
+        border: 1px solid var(--brand-gray-border); background: var(--brand-gray-bg);
+    }
+    .wall-modal-tab { display: none; }
+    .wall-modal-tab.active { display: block; }
+    .wall-member-row { cursor: move; }
+    .wall-member-grip { cursor: pointer; }
+    .wall-edit-toolbar .active { box-shadow: inset 0 0 0 2px rgba(58,124,165,.35); }
+    .wall-help-badge { font-size: .75rem; }
 </style>
 {% endblock %}
 
 {% block content %}
 {% csrf_token %}
-<h1>{{ page.display_label }}</h1>
-<p><a href="{% url 'projects:detail' project.pk %}">&larr; Back to {{ project.name }}</a></p>
+<div class="d-flex align-items-center justify-content-between mb-1">
+    <h1 class="mb-0 d-flex align-items-center gap-2" id="page-title-wrap"
+        data-label-url="{% url 'plans:page-label' page.pk %}" data-label="{{ page.label }}">
+        <span id="page-title-text">{{ page.display_label }}</span>
+        <button type="button" id="page-title-edit" class="btn btn-sm btn-outline-secondary no-print" title="Rename this page">
+            <i class="bi bi-pencil"></i>
+        </button>
+    </h1>
+    <span id="calibration-status" class="badge rounded-pill {% if is_calibrated %}badge-status-active{% else %}badge-status-archived{% endif %}">
+        {% if is_calibrated %}Calibrated{% else %}Not calibrated{% endif %}
+    </span>
+</div>
+<p class="project-card-meta mb-3">
+    <a href="{% url 'projects:detail' project.pk %}">&larr; Back to {{ project.name }}</a>
+    &middot; <a href="{% url 'estimating:estimate-detail' estimate.pk %}">Material List</a>
+</p>
+
+{% if project_pages|length > 1 %}
+<div id="page-strip" class="no-print" aria-label="Plan pages">
+    {% for p in project_pages %}
+    <a class="page-strip-item {% if p.pk == page.pk %}is-current{% endif %}"
+       href="{% url 'plans:viewer' p.pk %}"
+       title="{{ p.display_label }}{% if not p.scale_pixels_per_foot %} (not calibrated){% endif %}">
+        <img src="{{ p.thumbnail.url }}" alt="{{ p.display_label }}" loading="lazy">
+        <span class="page-strip-label">{{ p.display_label }}</span>
+        {% if not p.scale_pixels_per_foot %}<span class="page-strip-dot"></span>{% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
 
 <div id="plan-viewer"
+     data-page-id="{{ page.pk }}"
      data-image-url="{{ page.image.url }}"
      data-trace-create-url="{% url 'plans:trace-create' page.pk %}"
      data-trace-update-url-base="{% url 'plans:trace-update' 0 %}"
      data-trace-delete-url-base="{% url 'plans:trace-delete' 0 %}"
+     data-wall-detail-url-base="{% url 'plans:wall-elevation' 0 %}"
+     data-calibrate-url="{% url 'plans:page-calibrate' page.pk %}"
      data-presets-url="{% url 'plans:presets' %}"
-     data-default-stud-spacing="{{ default_stud_spacing_in }}">
+     data-material-summary-url="{% url 'estimating:estimate-material-summary' estimate.pk %}"
+     data-default-stud-spacing="{{ default_stud_spacing_in }}"
+     data-default-wall-height="{{ default_wall_height_in }}"
+     data-is-calibrated="{{ is_calibrated|yesno:'true,false' }}">
 
     <div id="tool-sidebar">
-        <button type="button" class="tool-btn btn btn-outline-primary" id="tool-line" data-tool="line" title="Line (Wall)">
+        <div class="dropdown">
+            <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Wall (W)">
+                <i class="bi bi-bricks"></i>
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="exterior">Exterior Wall</button></li>
+                <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="interior_bearing">Interior Bearing Wall</button></li>
+                <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="interior_non_bearing">Interior Non-Bearing Wall</button></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Opening (O)">
+                <i class="bi bi-door-open"></i>
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-semantic="opening" data-opening-kind="window">Window</button></li>
+                <li><button type="button" class="dropdown-item" data-semantic="opening" data-opening-kind="door">Door</button></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Beam (B)">
+                <i class="bi bi-layout-text-window"></i>
+            </button>
+            <ul class="dropdown-menu">
+                <li><button type="button" class="dropdown-item" data-semantic="beam" data-beam-type="flush">Flush Beam</button></li>
+                <li><button type="button" class="dropdown-item" data-semantic="beam" data-beam-type="dropped">Dropped Beam</button></li>
+            </ul>
+        </div>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="joist" title="Joist (J)">
+            <i class="bi bi-grid-3x3"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="column" title="Column (C)">
+            <i class="bi bi-record-circle"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="plate" title="Plate (P)">
+            <i class="bi bi-dash-lg"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="rim_board" title="Rim Board (R)">
+            <i class="bi bi-square"></i>
+        </button>
+
+        <hr class="my-1">
+
+        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="line" title="Draw Wall">
             <i class="bi bi-bricks"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="area" title="Draw Area Assembly">
+            <i class="bi bi-bounding-box-circles"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="polyline" title="Polyline / Custom Shape">
+            <i class="bi bi-bezier2"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="count" title="Count (Posts / Hardware)">
+            <i class="bi bi-123"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="opening" title="Draw Opening">
+            <i class="bi bi-door-open"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-secondary" data-tool="hand" title="Pan / Hand Tool (H)">
+            <i class="bi bi-hand-index"></i>
+        </button>
+        <button type="button" class="tool-btn btn btn-outline-secondary" data-tool="calibrate" title="Calibrate Scale">
+            <i class="bi bi-rulers"></i>
         </button>
         <button type="button" class="tool-btn btn btn-outline-danger" id="delete-selected" title="Delete Selected">
             <i class="bi bi-trash"></i>
         </button>
     </div>
 
-    <div id="plan-canvas-wrap">
-        <canvas id="plan-canvas"></canvas>
+    <div id="canvas-column">
+        <div id="zoom-controls" class="d-flex align-items-center gap-2 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-out" title="Zoom Out">
+                <i class="bi bi-dash-lg"></i>
+            </button>
+            <span id="zoom-level" class="small text-muted">100%</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-in" title="Zoom In">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-reset" title="Reset to 100%">Reset</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-fit" title="Fit to window">Fit</button>
+        </div>
+        <div id="plan-canvas-wrap">
+            <canvas id="plan-canvas"></canvas>
+        </div>
     </div>
 
     <div id="tool-panel">
+        <p class="small text-muted" id="tool-hint"></p>
+        <p class="small fw-bold" id="last-measurement"></p>
+
         <div id="no-selection-panel">
-            <p class="text-muted">Select a tool on the left to draw, or click an existing wall to view/edit it.</p>
+            <p class="text-muted small mb-2">Select a tool on the left to draw, or click an existing trace to view or edit it.</p>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="dismiss-onboarding-tip">Got it</button>
+        </div>
+
+        <div id="calibrate-panel" style="display: none;">
+            <p class="text-muted small mb-2">
+                Draw a line over a known real-world distance, or - if this page was imported from a PDF
+                drawn to scale - just set its printed scale directly below.
+            </p>
+            <div class="mb-2">
+                <label for="scale-preset-select" class="form-label">Drawing scale</label>
+                <select id="scale-preset-select" class="form-select">
+                    <option value="">-- select a scale --</option>
+                    <option value="0.0625">1/16&quot; = 1'-0&quot;</option>
+                    <option value="0.125">1/8&quot; = 1'-0&quot;</option>
+                    <option value="0.1875">3/16&quot; = 1'-0&quot;</option>
+                    <option value="0.25">1/4&quot; = 1'-0&quot;</option>
+                    <option value="0.3125">5/16&quot; = 1'-0&quot;</option>
+                    <option value="0.375">3/8&quot; = 1'-0&quot;</option>
+                    <option value="0.4375">7/16&quot; = 1'-0&quot;</option>
+                    <option value="0.5">1/2&quot; = 1'-0&quot;</option>
+                    <option value="0.5625">9/16&quot; = 1'-0&quot;</option>
+                    <option value="0.625">5/8&quot; = 1'-0&quot;</option>
+                    <option value="0.6875">11/16&quot; = 1'-0&quot;</option>
+                    <option value="0.75">3/4&quot; = 1'-0&quot;</option>
+                    <option value="0.8125">13/16&quot; = 1'-0&quot;</option>
+                    <option value="0.875">7/8&quot; = 1'-0&quot;</option>
+                    <option value="1">1&quot; = 1'-0&quot;</option>
+                </select>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="apply-scale-preset">Set Scale</button>
         </div>
 
         <div id="tool-settings-panel" style="display: none;">
-            <h2 class="h5">Line Tool Settings</h2>
-            <p class="text-muted small">Applied to the next line you draw.</p>
+            <h2 class="h5" id="tool-panel-title">Tool Settings</h2>
+            <p class="text-muted small">Applied to the next trace you draw.</p>
             <div class="mb-2">
-                <label for="material-select" class="form-label">Material</label>
+                <label for="material-select" class="form-label">Material tag (optional)</label>
                 <select id="material-select" class="form-select">
                     {% include 'plans/_material_options.html' %}
                 </select>
             </div>
             <div class="mb-2">
+                <label for="assembly-select" class="form-label">Assembly</label>
+                <select id="assembly-select" class="form-select"></select>
+                <p class="text-muted small mb-0">Computes a material list from the trace's measurement.</p>
+            </div>
+            <div class="mb-2">
+                <label for="color-input" class="form-label">Element color</label>
+                <input type="color" id="color-input" class="form-control form-control-color" value="#0d6efd">
+            </div>
+            <div class="form-check mb-2" data-field="closed">
+                <input type="checkbox" id="closed-input" class="form-check-input">
+                <label for="closed-input" class="form-check-label">Close shape to form an area</label>
+            </div>
+            <div class="mb-2" data-field="stud-spacing">
                 <label for="stud-spacing-input" class="form-label">Stud spacing (in, OC)</label>
                 <input type="number" id="stud-spacing-input" class="form-control" value="{{ default_stud_spacing_in }}">
+            </div>
+            <div class="mb-2" data-field="wall-height">
+                <label for="wall-height-input" class="form-label">Wall height (in)</label>
+                <input type="number" id="wall-height-input" class="form-control" step="0.125" value="{{ default_wall_height_in }}">
+                <p class="text-muted small mb-0">e.g. 97.125 for 8'-1-1/8" (a 92-5/8" precut stud), 109.125 for 9'-1-1/8".</p>
+            </div>
+            <div class="row g-2" data-field="plate-counts">
+                <div class="col-6 mb-2">
+                    <label for="top-plate-count-input" class="form-label">Top plates</label>
+                    <input type="number" id="top-plate-count-input" class="form-control" value="2" min="1">
+                </div>
+                <div class="col-6 mb-2">
+                    <label for="bottom-plate-count-input" class="form-label">Bottom plates</label>
+                    <input type="number" id="bottom-plate-count-input" class="form-control" value="1" min="1">
+                </div>
+            </div>
+            <div data-field="wall-layers" class="border rounded p-2 mb-2">
+                <p class="small fw-bold mb-1">Default visible layers</p>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="interior-drywall-input" checked><label class="form-check-label" for="interior-drywall-input">Interior drywall</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="exterior-sheathing-input" checked><label class="form-check-label" for="exterior-sheathing-input">Exterior sheathing</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="house-wrap-input" checked><label class="form-check-label" for="house-wrap-input">House wrap / WRB</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" id="siding-input" checked><label class="form-check-label" for="siding-input">Siding / finish</label></div>
+            </div>
+            <div class="mb-2" data-field="opening-type">
+                <label for="opening-type-select" class="form-label">Opening type</label>
+                <select id="opening-type-select" class="form-select">
+                    <option value="window">Window</option>
+                    <option value="door">Door</option>
+                </select>
+            </div>
+            <div class="row g-2" data-field="opening-size">
+                <div class="col-4 mb-2">
+                    <label for="sill-height-input" class="form-label">Sill</label>
+                    <input type="number" id="sill-height-input" class="form-control" value="36">
+                </div>
+                <div class="col-4 mb-2">
+                    <label for="rough-height-input" class="form-label">Height</label>
+                    <input type="number" id="rough-height-input" class="form-control" value="48">
+                </div>
+                <div class="col-4 mb-2">
+                    <label for="header-depth-input" class="form-label">Header</label>
+                    <input type="number" id="header-depth-input" class="form-control" value="9.25" step="0.25">
+                </div>
+            </div>
+            <div class="mb-2" data-field="spacing">
+                <label for="spacing-input" class="form-label">Member spacing (in, OC)</label>
+                <input type="number" id="spacing-input" class="form-control" value="{{ default_stud_spacing_in }}">
+            </div>
+            <div class="mb-2" data-field="direction">
+                <label for="direction-select" class="form-label">Members run</label>
+                <select id="direction-select" class="form-select">
+                    <option value="horizontal">Horizontally (left-right)</option>
+                    <option value="vertical">Vertically (up-down)</option>
+                </select>
             </div>
 
             <h2 class="h5 mt-3">Presets</h2>
             <div class="mb-2">
                 <select id="preset-select" class="form-select">
                     <option value="">-- load a preset --</option>
-                    {% for preset in presets %}
-                    <option value="{{ preset.id }}">{{ preset.name }}</option>
-                    {% endfor %}
                 </select>
             </div>
             <div class="input-group mb-2">
                 <input type="text" id="preset-name-input" class="form-control" placeholder="Preset name">
-                <button type="button" class="btn btn-secondary" id="save-preset">Save as preset</button>
+                <button type="button" class="btn btn-secondary" id="save-preset">Save</button>
             </div>
         </div>
 
         <div id="trace-inspector-panel" style="display: none;">
-            <h2 class="h5">Selected Wall</h2>
+            <h2 class="h5" id="inspector-title">Selected Trace</h2>
+            <p class="small text-muted" id="inspector-measurement"></p>
             <div class="mb-2">
-                <label for="inspector-material-select" class="form-label">Material</label>
+                <label for="inspector-material-select" class="form-label">Material tag</label>
                 <select id="inspector-material-select" class="form-select">
                     {% include 'plans/_material_options.html' %}
                 </select>
             </div>
             <div class="mb-2">
-                <label for="inspector-stud-spacing-input" class="form-label">Stud spacing (in, OC)</label>
-                <input type="number" id="inspector-stud-spacing-input" class="form-control">
+                <label for="inspector-assembly-select" class="form-label">Assembly</label>
+                <select id="inspector-assembly-select" class="form-select"></select>
             </div>
+            <div class="mb-2" id="inspector-parent-wall-wrap" style="display: none;">
+                <label for="inspector-parent-wall-select" class="form-label">Attached to wall</label>
+                <select id="inspector-parent-wall-select" class="form-select">
+                    <option value="">-- none --</option>
+                </select>
+            </div>
+            <div class="mb-2">
+                <label for="inspector-color-input" class="form-label">Element color</label>
+                <input type="color" id="inspector-color-input" class="form-control form-control-color">
+            </div>
+            <div id="inspector-settings"></div>
+            <button type="button" class="btn btn-outline-secondary mb-2" id="view-wall-elevation" style="display: none;">Wall elevation / framing</button>
             <button type="button" class="btn btn-primary" id="save-trace-changes">Save changes</button>
             <button type="button" class="btn btn-outline-danger" id="delete-inspected-trace">Delete</button>
         </div>
     </div>
+
+    <div id="material-list-panel">
+        <h2 class="h6 mb-1">Material List</h2>
+        <p class="small text-muted mb-2">
+            Live totals for this project's estimate (all pages).
+            <a href="{% url 'estimating:estimate-detail' estimate.pk %}">Full view &rarr;</a>
+        </p>
+        <div id="material-list-content"></div>
+    </div>
+</div>
+
+
+<div id="wall-elevation-backdrop"></div>
+<div id="wall-elevation-modal" role="dialog" aria-modal="true" aria-labelledby="wall-elevation-title">
+    <div class="d-flex justify-content-between align-items-start gap-3 mb-2">
+        <div>
+            <h2 class="h4 mb-1" id="wall-elevation-title">Wall Assembly Viewer</h2>
+            <p class="small text-muted mb-1" id="wall-elevation-meta"></p>
+            <p class="small mb-0" id="wall-elevation-summary"></p>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="close-wall-elevation">Close</button>
+    </div>
+    <div class="btn-group mb-3" role="group" aria-label="Wall viewer mode">
+        <button type="button" class="btn btn-outline-primary active" data-wall-tab="framing">Framing elevation</button>
+        <button type="button" class="btn btn-outline-primary" data-wall-tab="layers">Layers / 3D</button>
+        <button type="button" class="btn btn-outline-primary" data-wall-tab="cuts">Cut list</button>
+    </div>
+    <div id="wall-tab-framing" class="wall-modal-tab active">
+        <div id="wall-edit-toolbar" class="wall-edit-toolbar d-flex flex-wrap align-items-center gap-2 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" data-wall-tool="select">Select / Move</button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-wall-tool="add-stud">Draw vertical member</button>
+            <button type="button" class="btn btn-sm btn-outline-primary" data-wall-tool="add-block">Draw blocking / custom member</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" id="delete-wall-member-inline" disabled>Delete selected</button>
+            <span id="wall-edit-status" class="badge text-bg-light border wall-help-badge">Drag members or blue grips. Changes auto-save.</span>
+        </div>
+        <div id="wall-elevation-canvas"></div>
+        <p class="small text-muted mt-2 mb-0">Drag a member to move it. Drag blue grips to stretch/shrink. Use draw modes to click-drag new studs or blocking directly on the wall.</p>
+        <div id="wall-member-detail" class="alert alert-light border mt-2" style="display:none;"></div>
+    </div>
+    <div id="wall-tab-layers" class="wall-modal-tab">
+        <div id="wall-3d-canvas"></div>
+        <div id="wall-layer-list" class="mt-2"></div>
+    </div>
+    <div id="wall-tab-cuts" class="wall-modal-tab">
+        <div id="wall-cut-list"></div>
+    </div>
 </div>
 
 {{ traces|json_script:"traces-data" }}
+{{ materials_data|json_script:"materials-data" }}
+{{ assemblies_data|json_script:"assemblies-data" }}
 {{ presets_data|json_script:"presets-data" }}
+{{ walls_data|json_script:"walls-data" }}
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
 <script src="{% static 'plans/viewer.js' %}"></script>
+<script>
+(function () {
+    'use strict';
+    // Inline page rename: pencil next to the title swaps in an input, Enter
+    // or blur saves over fetch (the label endpoint answers JSON to XHR),
+    // Escape cancels. The current strip label updates in place too, so no
+    // reload is needed and no trip back to project detail.
+    var wrap = document.getElementById('page-title-wrap');
+    var text = document.getElementById('page-title-text');
+    var editBtn = document.getElementById('page-title-edit');
+    if (!wrap || !text || !editBtn) { return; }
+
+    var csrfInput = document.querySelector('[name=csrfmiddlewaretoken]');
+    var editing = false;
+
+    function beginEdit() {
+        if (editing) { return; }
+        editing = true;
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm';
+        input.style.maxWidth = '280px';
+        input.value = wrap.dataset.label || '';
+        input.placeholder = text.textContent;
+        text.hidden = true;
+        editBtn.hidden = true;
+        wrap.insertBefore(input, text);
+        input.focus();
+        input.select();
+
+        var finished = false;
+        function endEdit() {
+            if (finished) { return; }
+            finished = true;
+            input.remove();
+            text.hidden = false;
+            editBtn.hidden = false;
+            editing = false;
+        }
+        function save() {
+            if (finished) { return; }
+            var body = new FormData();
+            body.append('label', input.value.trim());
+            fetch(wrap.dataset.labelUrl, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfInput ? csrfInput.value : '',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                body: body,
+            })
+                .then(function (response) { return response.ok ? response.json() : Promise.reject(); })
+                .then(function (data) {
+                    wrap.dataset.label = data.label;
+                    text.textContent = data.display_label;
+                    document.title = data.display_label;
+                    var stripLabel = document.querySelector('#page-strip .page-strip-item.is-current .page-strip-label');
+                    if (stripLabel) { stripLabel.textContent = data.display_label; }
+                    endEdit();
+                })
+                .catch(endEdit);
+        }
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') { event.preventDefault(); save(); }
+            if (event.key === 'Escape') { endEdit(); }
+        });
+        input.addEventListener('blur', save);
+    }
+
+    editBtn.addEventListener('click', beginEdit);
+})();
+</script>
 {% endblock %}

@@ -34,6 +34,7 @@ class ToolPresetViewTests(TestCase):
         payload = {
             'name': 'Exterior Wall', 'tool_type': 'line',
             'material_id': self.material.id, 'settings': {'stud_spacing_in': 16},
+            'color': '#112233',
         }
         self.client.post(url, data=json.dumps(payload), content_type='application/json')
 
@@ -43,3 +44,4 @@ class ToolPresetViewTests(TestCase):
         presets = ToolPreset.objects.filter(account=self.user.account, name='Exterior Wall')
         self.assertEqual(presets.count(), 1)
         self.assertEqual(presets.first().settings['stud_spacing_in'], 24)
+        self.assertEqual(presets.first().color, '#112233')

@@ -4,32 +4,53 @@
 {% block title %}Dashboard{% endblock %}
 {% block meta_description %}Your projects.{% endblock %}
 
+{% block topbar_title %}Projects{% endblock %}
 {% block content %}
-<h1>Projects</h1>
-<p><a class="btn btn-primary" href="{% url 'projects:create' %}">New Project</a></p>
+<div class="page-head">
+    <div>
+        <h1 class="page-title">Projects</h1>
+        <p class="page-subtitle">Your active takeoffs and material lists.</p>
+    </div>
+    <div class="page-head-actions">
+        <a class="btn btn-outline-primary" href="{% url 'projects:template-library' %}"><i class="bi bi-journal-text"></i> Templates</a>
+        <a class="btn btn-primary" href="{% url 'projects:create' %}"><i class="bi bi-plus-lg"></i> New Project</a>
+    </div>
+</div>
+
+<div class="stat-strip">
+    <div class="stat-card">
+        <div class="stat-value">{{ active_count }}</div>
+        <div class="stat-label">Active Projects</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ archived_count }}</div>
+        <div class="stat-label">Archived</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_count }}</div>
+        <div class="stat-label">Total Projects</div>
+    </div>
+</div>
 
 {% if projects %}
-<table class="table">
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Client</th>
-            <th>Status</th>
-            <th>Created</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for project in projects %}
-        <tr>
-            <td><a href="{% url 'projects:detail' project.pk %}">{{ project.name }}</a></td>
-            <td>{{ project.client }}</td>
-            <td>{{ project.get_status_display }}</td>
-            <td>{{ project.created_at|date:'M j, Y' }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="project-card-grid">
+    {% for project in projects %}
+    <div class="project-card position-relative">
+        <div class="d-flex align-items-start justify-content-between">
+            <span class="project-card-title">{{ project.name }}</span>
+            <span class="badge rounded-pill badge-status-{{ project.status }}">{{ project.get_status_display }}</span>
+        </div>
+        {% if project.client %}<div class="project-card-meta"><i class="bi bi-person"></i> {{ project.client }}</div>{% endif %}
+        <div class="project-card-meta"><i class="bi bi-calendar3"></i> Created {{ project.created_at|date:'M j, Y' }}</div>
+        <a class="stretched-link" href="{% url 'projects:detail' project.pk %}"></a>
+    </div>
+    {% endfor %}
+</div>
 {% else %}
-<p>No projects yet.</p>
+<div class="empty-state">
+    <i class="bi bi-house-add" style="font-size: 2rem;"></i>
+    <p class="mb-3 mt-2">No projects yet. Create one to upload plans and start tracing.</p>
+    <a class="btn btn-primary" href="{% url 'projects:create' %}"><i class="bi bi-plus-lg"></i> New Project</a>
+</div>
 {% endif %}
 {% endblock %}

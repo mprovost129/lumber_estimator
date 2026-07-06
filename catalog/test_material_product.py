@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -68,6 +70,103 @@ class MaterialProductInputTypeTests(TestCase):
         length = MaterialLength(product=product, length_ft=8)
         with self.assertRaises(ValidationError):
             length.full_clean()
+
+    def test_default_length_ft_returns_the_flagged_length(self):
+        product = MaterialProduct.objects.create(name='Test Plate Stock', input_type=MaterialProduct.InputType.FT)
+        MaterialLength.objects.create(product=product, length_ft=8)
+        MaterialLength.objects.create(product=product, length_ft=16, is_default=True)
+        MaterialLength.objects.create(product=product, length_ft=24)
+        self.assertEqual(product.default_length_ft, 16)
+
+    def test_default_length_ft_raises_when_no_default_set(self):
+        product = MaterialProduct.objects.create(name='Test No Default', input_type=MaterialProduct.InputType.FT)
+        MaterialLength.objects.create(product=product, length_ft=8)
+        with self.assertRaises(ValueError):
+            product.default_length_ft
+
+    def test_default_length_ft_raises_for_non_ft_material(self):
+        product = MaterialProduct.objects.create(name='Deck Screws 4in', input_type=MaterialProduct.InputType.EACH)
+        with self.assertRaises(ValueError):
+            product.default_length_ft
+
+    def test_stock_length_for_supports_precut_stud_fractional_lengths(self):
+        # 92-5/8 in and 104-5/8 in precuts, exact at 5 decimal places in feet.
+        product = MaterialProduct.objects.create(name='Test Stud', input_type=MaterialProduct.InputType.FT)
+        MaterialLength.objects.create(product=product, length_ft=Decimal('7.71875'))
+        MaterialLength.objects.create(product=product, length_ft=Decimal('8.71875'))
+        MaterialLength.objects.create(product=product, length_ft=10)
+        self.assertEqual(product.stock_length_for(Decimal('7.71875')), Decimal('7.71875'))
+        self.assertEqual(product.stock_length_for(Decimal('8')), Decimal('8.71875'))
+
+    def test_material_length_str_shows_fraction_and_strips_trailing_zeros(self):
+        product = MaterialProduct.objects.create(name='Test Stud Str', input_type=MaterialProduct.InputType.FT)
+        precut = MaterialLength.objects.create(product=product, length_ft=Decimal('7.71875'))
+        whole = MaterialLength.objects.create(product=product, length_ft=10)
+        self.assertEqual(str(precut), 'Test Stud Str - 7.71875 ft')
+        self.assertEqual(str(whole), 'Test Stud Str - 10 ft')
+
+
+class PiecesForLengthTests(TestCase):
+    """max_length_ft and pieces_for_length: how a member is split into stock
+    pieces, including splicing when it is longer than the longest stock."""
+
+    def setUp(self):
+        self.material = MaterialProduct.objects.create(
+            name='Beam Stock', input_type=MaterialProduct.InputType.FT,
+        )
+        for length in (12, 16, 20):
+            MaterialLength.objects.create(
+                product=self.material, length_ft=length, is_default=(length == 16),
+            )
+
+    def test_max_length_ft_returns_longest_stock(self):
+        self.assertEqual(self.material.max_length_ft, Decimal('20'))
+
+    def test_pieces_for_length_single_piece_when_it_fits(self):
+        # 14 ft needs one piece, cut from the smallest covering stock (16 ft).
+        self.assertEqual(self.material.pieces_for_length(14), (1, Decimal('16')))
+
+    def test_pieces_for_length_exact_stock_is_one_piece(self):
+        self.assertEqual(self.material.pieces_for_length(20), (1, Decimal('20')))
+
+    def test_pieces_for_length_splices_when_over_length(self):
+        # 44 ft: ceil(44 / 20) = 3 pieces of the longest (20 ft) stock.
+        self.assertEqual(self.material.pieces_for_length(44), (3, Decimal('20')))
+
+    def test_max_length_ft_raises_for_non_ft_material(self):
+        each = MaterialProduct.objects.create(
+            name='Bracket', input_type=MaterialProduct.InputType.EACH,
+        )
+        with self.assertRaises(ValueError):
+            _ = each.max_length_ft
+
+
+class SeededPrecutStudLengthTests(TestCase):
+    """Spot-checks against the actual migrated seed data (0006), not a fresh
+    fixture, so a future migration can't silently drop these precut lengths."""
+
+    def _lengths_for(self, dimension):
+        product = MaterialProduct.objects.get(
+            account__isnull=True, species='SPF', grade='#2', nominal_dimension=dimension,
+        )
+        return set(product.lengths.values_list('length_ft', flat=True))
+
+    def test_2x4_spf_has_both_precut_lengths(self):
+        lengths = self._lengths_for('2x4')
+        self.assertIn(Decimal('7.71875'), lengths)
+        self.assertIn(Decimal('8.71875'), lengths)
+
+    def test_2x6_spf_has_both_precut_lengths(self):
+        lengths = self._lengths_for('2x6')
+        self.assertIn(Decimal('7.71875'), lengths)
+        self.assertIn(Decimal('8.71875'), lengths)
+
+    def test_existing_default_length_untouched(self):
+        product = MaterialProduct.objects.get(
+            account__isnull=True, species='SPF', grade='#2', nominal_dimension='2x4',
+        )
+        default = product.lengths.get(is_default=True)
+        self.assertEqual(default.length_ft, 16)
 
 
 class MaterialProductVisibilityTests(TestCase):

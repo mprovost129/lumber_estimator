@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block title %}Job Settings - {{ job_settings.project.name }}{% endblock %}
+{% block meta_description %}Edit job settings.{% endblock %}
+
+{% block content %}
+<h1 class="mb-1">Job Settings</h1>
+<p class="project-card-meta mb-3">
+    <a href="{% url 'projects:detail' job_settings.project.pk %}">&larr; Back to {{ job_settings.project.name }}</a>
+</p>
+<p class="text-muted">These are the project-wide defaults used by the drawing tools. Changing them does not recalculate traces you have already drawn; re-save a trace to apply new values to it.</p>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+    <a class="btn btn-outline-primary" href="{{ save_template_url }}"><i class="bi bi-bookmark-plus"></i> Save as Template</a>
+    <a class="btn btn-outline-secondary" href="{% url 'projects:template-library' %}"><i class="bi bi-journal-text"></i> Manage Templates</a>
+</div>
+
+<div class="card p-3" style="max-width: 540px;">
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </form>
+</div>
+{% endblock %}

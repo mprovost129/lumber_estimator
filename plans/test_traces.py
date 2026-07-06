@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from catalog.models import MaterialProduct
+from estimating.models import Assembly
 from projects.models import JobSettings, Project
 
 from .models import Plan, PlanPage, Trace
@@ -39,6 +40,45 @@ class TraceTenancyTests(TestCase):
         self.client.force_login(self.user_a)
         response = self.client.get(reverse('plans:viewer', args=[self.page_b.pk]))
         self.assertEqual(response.status_code, 404)
+
+    def test_viewer_context_includes_estimate_and_material_summary_url(self):
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('plans:viewer', args=[self.page_a.pk]))
+        self.assertEqual(response.status_code, 200)
+        estimate = self.project_a.get_or_create_estimate()
+        self.assertEqual(response.context['estimate'], estimate)
+        self.assertContains(
+            response, reverse('estimating:estimate-material-summary', args=[estimate.pk]),
+        )
+
+    def test_viewer_assemblies_data_carries_is_default_flag(self):
+        # The viewer auto-selects a default assembly per semantic tool, which
+        # needs is_default present on each assembly in the serialized payload.
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('plans:viewer', args=[self.page_a.pk]))
+        assemblies = response.context['assemblies_data']
+        self.assertTrue(assemblies, 'expected seeded global assemblies in the viewer payload')
+        self.assertTrue(all('is_default' in assembly for assembly in assemblies))
+        self.assertTrue(any(assembly['is_default'] for assembly in assemblies))
+
+    def test_viewer_page_strip_lists_all_project_pages_but_not_foreign_ones(self):
+        # The strip spans every page in the project, across plans, oldest plan
+        # first, and never leaks another account's pages.
+        second_page = make_plan_page(self.project_a, label='Second Floor')
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('plans:viewer', args=[self.page_a.pk]))
+        strip_ids = [p.pk for p in response.context['project_pages']]
+        self.assertEqual(strip_ids, [self.page_a.pk, second_page.pk])
+        self.assertNotIn(self.page_b.pk, strip_ids)
+        self.assertContains(response, 'id="page-strip"')
+        self.assertContains(response, reverse('plans:viewer', args=[second_page.pk]))
+        # The current page is highlighted.
+        self.assertContains(response, 'page-strip-item is-current')
+
+    def test_viewer_page_strip_hidden_for_single_page_project(self):
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('plans:viewer', args=[self.page_a.pk]))
+        self.assertNotContains(response, 'id="page-strip"')
 
     def test_cannot_create_trace_on_other_accounts_page(self):
         self.client.force_login(self.user_a)
@@ -175,3 +215,82 @@ class TraceSnapshotTests(TestCase):
         self.assertEqual(first_trace.settings['stud_spacing_in'], 16)
         self.assertEqual(second_trace.material_id, self.material_2x6.id)
         self.assertEqual(second_trace.settings['stud_spacing_in'], 24)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class PolylineTraceTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='polyline@example.com', password='testpass123')
+        self.project = Project.objects.create(account=self.user.account, name='Shape House')
+        JobSettings.objects.create(project=self.project)
+        self.page = make_plan_page(self.project)
+        self.page.scale_pixels_per_foot = 10
+        self.page.save(update_fields=['scale_pixels_per_foot'])
+        self.client.force_login(self.user)
+
+    def test_create_closed_polyline_with_custom_color(self):
+        response = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'polyline',
+                'geometry': [
+                    {'x': 0, 'y': 0}, {'x': 100, 'y': 0},
+                    {'x': 100, 'y': 50}, {'x': 0, 'y': 50},
+                ],
+                'settings': {'closed': True},
+                'color': '#123ABC',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()['measurement_display'], '50 sq ft')
+        trace = Trace.objects.get(pk=response.json()['id'])
+        self.assertEqual(trace.tool_type, Trace.ToolType.POLYLINE)
+        self.assertEqual(trace.color, '#123ABC')
+        self.assertTrue(trace.settings['closed'])
+
+    def test_closed_polyline_requires_three_points(self):
+        response = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'polyline',
+                'geometry': [{'x': 0, 'y': 0}, {'x': 100, 'y': 0}],
+                'settings': {'closed': True},
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_rejects_invalid_color(self):
+        response = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'polyline',
+                'geometry': [{'x': 0, 'y': 0}, {'x': 100, 'y': 0}],
+                'color': 'red',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_closed_polyline_can_use_area_assembly(self):
+        assembly = Assembly.objects.create(name='Shape Area', tool_type='area')
+        response = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'polyline',
+                'geometry': [
+                    {'x': 0, 'y': 0}, {'x': 100, 'y': 0},
+                    {'x': 100, 'y': 50}, {'x': 0, 'y': 50},
+                ],
+                'settings': {'closed': True},
+                'assembly_id': assembly.pk,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Trace.objects.get(pk=response.json()['id']).assembly, assembly)

@@ -5,7 +5,9 @@ from .models import Plan
 
 
 class PlanUploadForm(forms.ModelForm):
-    original_file = forms.FileField(validators=[FileExtensionValidator(allowed_extensions=['pdf'])])
+    original_file = forms.FileField(
+        validators=[FileExtensionValidator(allowed_extensions=['pdf', 'png', 'jpg', 'jpeg'])],
+    )
 
     class Meta:
         model = Plan

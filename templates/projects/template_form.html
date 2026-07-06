@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block title %}{% if form.instance.pk %}Edit Template{% else %}New Template{% endif %}{% endblock %}
+{% block meta_description %}Create or edit a project template.{% endblock %}
+
+{% block topbar_title %}Templates{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">{% if form.instance.pk %}Edit Template{% else %}New Template{% endif %}</h1>
+        <p class="page-subtitle">Reusable defaults for project setup and trace settings.</p>
+    </div>
+    <div class="page-head-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'projects:template-library' %}"><i class="bi bi-arrow-left"></i> Back to Templates</a>
+    </div>
+</div>
+
+<div class="card p-3" style="max-width: 680px;">
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            <button type="submit" class="btn btn-primary">{% if form.instance.pk %}Save Changes{% else %}Create Template{% endif %}</button>
+            <a class="btn btn-outline-secondary" href="{% url 'projects:template-library' %}">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,381 @@
+{% extends 'base.html' %}
+
+{% block title %}Library{% endblock %}
+{% block meta_description %}Browse materials, assemblies, and formulas.{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">Library</h1>
+        <p class="page-subtitle">Your catalog of materials, prebuilt assemblies, and reusable formulas.</p>
+    </div>
+    <div class="page-head-actions">
+        <a class="btn btn-outline-primary" href="{% url 'estimating:formula-create' %}"><i class="bi bi-plus-lg"></i> New formula</a>
+        <a class="btn btn-primary" href="{% url 'estimating:assembly-create' %}"><i class="bi bi-plus-lg"></i> New assembly</a>
+    </div>
+</div>
+
+<div class="lib" id="library">
+    <div class="lib-toolbar">
+        <div class="lib-tabs" role="tablist">
+            <button class="lib-tab is-active" data-panel="materials" type="button">
+                <i class="bi bi-boxes"></i> Materials <span class="lib-count">{{ material_count }}</span>
+            </button>
+            <button class="lib-tab" data-panel="assemblies" type="button">
+                <i class="bi bi-diagram-3"></i> Assemblies <span class="lib-count">{{ assembly_count }}</span>
+            </button>
+            <button class="lib-tab" data-panel="formulas" type="button">
+                <i class="bi bi-calculator"></i> Formulas <span class="lib-count">{{ formulas|length }}</span>
+            </button>
+        </div>
+        <div class="lib-search">
+            <i class="bi bi-search"></i>
+            <input type="search" id="lib-search-input" placeholder="Search the library..." autocomplete="off">
+        </div>
+    </div>
+
+    <!-- ================= MATERIALS ================= -->
+    <section class="lib-panel is-active" data-panel="materials">
+        <div class="lib-chips" id="material-chips">
+            <button class="lib-chip is-active" data-filter="all" type="button">All</button>
+            {% for group in material_groups %}
+            <button class="lib-chip" data-filter="{{ group.key }}" type="button">{{ group.label }}</button>
+            {% endfor %}
+        </div>
+
+        {% for group in material_groups %}
+        <div class="lib-group" data-category="{{ group.key }}">
+            <div class="lib-group-head">
+                <h2 class="lib-group-title">{{ group.label }}</h2>
+                <span class="lib-group-count">{{ group.materials|length }}</span>
+            </div>
+            <div class="mat-grid">
+                {% for material in group.materials %}
+                <article class="mat-card" data-name="{{ material.name|lower }}" data-category="{{ group.key }}">
+                    <div class="mat-card-body">
+                        <div class="mat-card-icon"><i class="bi bi-box-seam"></i></div>
+                        <div class="mat-card-main">
+                            <div class="mat-card-name">{{ material.name }}</div>
+                            <div class="mat-card-meta">
+                                {% if material.species %}{{ material.species }}{% endif %}
+                                {% if material.grade %} &middot; {{ material.grade }}{% endif %}
+                                {% if material.nominal_dimension %} &middot; {{ material.nominal_dimension }}{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mat-card-foot">
+                        <span class="tag tag-{{ material.input_type }}">
+                            {% if material.input_type == 'ft' %}<i class="bi bi-rulers"></i> Stock lengths
+                            {% elif material.input_type == 'box' %}<i class="bi bi-box2"></i> {{ material.quantity_per_box }}/box
+                            {% else %}<i class="bi bi-1-circle"></i> Each{% endif %}
+                        </span>
+                        {% if material.account_id %}<span class="tag tag-mine">Custom</span>{% else %}<span class="tag tag-stock">Stock</span>{% endif %}
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </div>
+        {% empty %}
+        <div class="empty-state">No materials in your library yet.</div>
+        {% endfor %}
+        <div class="lib-noresult" id="material-noresult" hidden>No materials match your search.</div>
+    </section>
+
+    <!-- ================= ASSEMBLIES ================= -->
+    <section class="lib-panel" data-panel="assemblies">
+        {% for group in assembly_groups %}
+        <div class="lib-group">
+            <div class="lib-group-head">
+                <h2 class="lib-group-title">{{ group.label }}</h2>
+                <span class="lib-group-count">{{ group.assemblies|length }}</span>
+            </div>
+            <div class="asm-grid">
+                {% for assembly in group.assemblies %}
+                <article class="asm-card" data-name="{{ assembly.name|lower }} {{ assembly.description|lower }}" data-assembly-id="{{ assembly.pk }}">
+                    <div class="asm-card-head">
+                        <h3 class="asm-card-name">{{ assembly.name }}</h3>
+                        <div class="asm-card-head-side">
+                            {% if assembly.account_id %}<span class="tag tag-mine">Custom</span>{% else %}<span class="tag tag-stock">Stock</span>{% endif %}
+                            <button type="button" class="asm-edit-btn" data-assembly-id="{{ assembly.pk }}" title="Quick edit materials and waste">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="asm-card-sub">
+                        <span class="pill"><i class="bi bi-pencil-square"></i> {{ assembly.get_tool_type_display }}</span>
+                        {% if assembly.wall_subtype %}<span class="pill">{{ assembly.get_wall_subtype_display }}</span>{% endif %}
+                    </div>
+                    {% if assembly.description %}<p class="asm-card-desc">{{ assembly.description }}</p>{% endif %}
+                    <ul class="asm-rules">
+                        {% for rule in assembly.rules.all %}
+                        <li>
+                            <span class="asm-rule-role">{{ rule.role }}</span>
+                            <span class="asm-rule-mat">{{ rule.material.name }}</span>
+                            <span class="asm-rule-formula">{% if rule.formula %}{{ rule.formula.expression }}{% else %}{{ rule.get_formula_kind_display }}{% endif %}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </article>
+                {% endfor %}
+            </div>
+        </div>
+        {% empty %}
+        <div class="empty-state">No assemblies available.</div>
+        {% endfor %}
+        <div class="lib-noresult" id="assembly-noresult" hidden>No assemblies match your search.</div>
+    </section>
+
+    <!-- ================= FORMULAS ================= -->
+    <section class="lib-panel" data-panel="formulas">
+        <div class="card">
+            <div class="table-responsive">
+                <table class="table data-table align-middle mb-0">
+                    <thead><tr><th>Name</th><th>Expression</th><th>Measurement</th><th>Source</th></tr></thead>
+                    <tbody>
+                    {% for formula in formulas %}
+                        <tr data-name="{{ formula.name|lower }}">
+                            <td>
+                                <strong>{{ formula.name }}</strong>
+                                {% if formula.description %}<div class="cell-sub">{{ formula.description }}</div>{% endif %}
+                            </td>
+                            <td><code class="expr">{{ formula.expression }}</code></td>
+                            <td>{{ formula.get_measurement_kind_display }}</td>
+                            <td>{% if formula.account_id %}<span class="tag tag-mine">My library</span>{% else %}<span class="tag tag-stock">Stock</span>{% endif %}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="4" class="text-muted">No formulas available.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="lib-noresult" id="formula-noresult" hidden>No formulas match your search.</div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ materials_flat|json_script:"materials-flat" }}
+<div id="asm-drawer" class="asm-drawer" hidden>
+    <div class="asm-drawer-scrim" data-drawer-close></div>
+    <div class="asm-drawer-panel" role="dialog" aria-label="Quick edit assembly">
+        <div class="asm-drawer-head">
+            <div>
+                <h2 class="asm-drawer-title" id="asm-drawer-title"></h2>
+                <p class="asm-drawer-sub" id="asm-drawer-sub"></p>
+            </div>
+            <button type="button" class="asm-drawer-close" data-drawer-close aria-label="Close"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="asm-drawer-body" id="asm-drawer-body"></div>
+        <div class="asm-drawer-foot">
+            <span class="asm-drawer-error" id="asm-drawer-error"></span>
+            <button type="button" class="btn btn-primary" id="asm-drawer-save"><i class="bi bi-check-lg"></i> Save</button>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    'use strict';
+    var root = document.getElementById('library');
+    if (!root) { return; }
+
+    var tabs = root.querySelectorAll('.lib-tab');
+    var panels = root.querySelectorAll('.lib-panel');
+    tabs.forEach(function (tab) {
+        tab.addEventListener('click', function () {
+            var name = tab.dataset.panel;
+            tabs.forEach(function (t) { t.classList.toggle('is-active', t === tab); });
+            panels.forEach(function (p) { p.classList.toggle('is-active', p.dataset.panel === name); });
+            applySearch();
+        });
+    });
+
+    var chips = root.querySelectorAll('#material-chips .lib-chip');
+    var activeCategory = 'all';
+    chips.forEach(function (chip) {
+        chip.addEventListener('click', function () {
+            activeCategory = chip.dataset.filter;
+            chips.forEach(function (c) { c.classList.toggle('is-active', c === chip); });
+            applySearch();
+        });
+    });
+
+    var input = document.getElementById('lib-search-input');
+    input.addEventListener('input', applySearch);
+
+    function activePanelName() {
+        var active = root.querySelector('.lib-panel.is-active');
+        return active ? active.dataset.panel : 'materials';
+    }
+
+    function applySearch() {
+        var q = input.value.trim().toLowerCase();
+        var panel = activePanelName();
+        if (panel === 'materials') {
+            filterMaterials(q);
+        } else if (panel === 'assemblies') {
+            filterCards('.lib-panel[data-panel="assemblies"] .lib-group', q, 'assembly-noresult');
+        } else {
+            filterRows('.lib-panel[data-panel="formulas"] tbody tr', q, 'formula-noresult');
+        }
+    }
+
+    function filterMaterials(q) {
+        var anyVisible = false;
+        root.querySelectorAll('.lib-panel[data-panel="materials"] .lib-group').forEach(function (group) {
+            var groupVisible = false;
+            group.querySelectorAll('.mat-card').forEach(function (card) {
+                var matchCat = activeCategory === 'all' || card.dataset.category === activeCategory;
+                var matchText = !q || card.dataset.name.indexOf(q) !== -1;
+                var show = matchCat && matchText;
+                card.hidden = !show;
+                if (show) { groupVisible = true; anyVisible = true; }
+            });
+            group.hidden = !groupVisible;
+        });
+        document.getElementById('material-noresult').hidden = anyVisible;
+    }
+
+    function filterCards(groupSel, q, noResultId) {
+        var anyVisible = false;
+        document.querySelectorAll(groupSel).forEach(function (group) {
+            var groupVisible = false;
+            group.querySelectorAll('.asm-card').forEach(function (card) {
+                var show = !q || card.dataset.name.indexOf(q) !== -1;
+                card.hidden = !show;
+                if (show) { groupVisible = true; anyVisible = true; }
+            });
+            group.hidden = !groupVisible;
+        });
+        document.getElementById(noResultId).hidden = anyVisible;
+    }
+
+    function filterRows(rowSel, q, noResultId) {
+        var anyVisible = false;
+        document.querySelectorAll(rowSel).forEach(function (row) {
+            if (!row.dataset.name) { return; }
+            var show = !q || row.dataset.name.indexOf(q) !== -1;
+            row.hidden = !show;
+            if (show) { anyVisible = true; }
+        });
+        document.getElementById(noResultId).hidden = anyVisible;
+    }
+
+    // ------------------------------------------------- quick-edit drawer
+    // Edit a rule's material or waste without the full assembly form. Editing
+    // a stock assembly clones it into "my library" server-side (copy-on-write),
+    // so the drawer warns about that and the page reloads after save to
+    // re-render the grouped lists with the clone in place.
+    var drawer = document.getElementById('asm-drawer');
+    var drawerBody = document.getElementById('asm-drawer-body');
+    var drawerTitle = document.getElementById('asm-drawer-title');
+    var drawerSub = document.getElementById('asm-drawer-sub');
+    var drawerError = document.getElementById('asm-drawer-error');
+    var drawerSave = document.getElementById('asm-drawer-save');
+    var materialsFlat = JSON.parse(document.getElementById('materials-flat').textContent);
+    var quickEditUrlBase = "{% url 'estimating:assembly-quick-edit' 0 %}";
+    var csrftoken = '{{ csrf_token }}';
+    var openAssemblyId = null;
+
+    function materialSelectHtml(selectedId) {
+        var html = '<select class="form-select form-select-sm asm-rule-material">';
+        materialsFlat.forEach(function (m) {
+            html += '<option value="' + m.id + '"' + (m.id === selectedId ? ' selected' : '') + '>'
+                 + m.name.replace(/</g, '&lt;') + '</option>';
+        });
+        return html + '</select>';
+    }
+
+    function openDrawer(assemblyId) {
+        openAssemblyId = assemblyId;
+        drawerError.textContent = '';
+        drawerBody.innerHTML = '<p class="text-muted small">Loading...</p>';
+        drawer.hidden = false;
+        document.body.classList.add('asm-drawer-open');
+        fetch(quickEditUrlBase.replace('0', assemblyId))
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+            .then(function (data) {
+                drawerTitle.textContent = data.name;
+                drawerSub.textContent = data.is_global
+                    ? 'Stock assembly: saving creates your own "(Custom)" copy with these changes.'
+                    : 'Your assembly: changes save in place.';
+                var html = '';
+                data.rules.forEach(function (rule) {
+                    var wastePct = Math.round(parseFloat(rule.waste_factor) * 1000) / 10;
+                    html += '<div class="asm-drawer-rule" data-rule-id="' + rule.id + '">'
+                         + '<div class="asm-drawer-rule-head"><strong>' + rule.role.replace(/</g, '&lt;') + '</strong>'
+                         + '<span class="asm-drawer-kind">' + rule.kind.replace(/</g, '&lt;') + '</span></div>'
+                         + '<div class="asm-drawer-rule-fields">'
+                         + materialSelectHtml(rule.material_id)
+                         + '<div class="input-group input-group-sm asm-waste-group">'
+                         + '<input type="number" class="form-control asm-rule-waste" min="0" max="100" step="0.5" value="' + wastePct + '">'
+                         + '<span class="input-group-text">% waste</span></div>'
+                         + '</div></div>';
+                });
+                drawerBody.innerHTML = html || '<p class="text-muted small">No rules on this assembly.</p>';
+            })
+            .catch(function () {
+                drawerBody.innerHTML = '<p class="text-danger small">Could not load this assembly.</p>';
+            });
+    }
+
+    function closeDrawer() {
+        drawer.hidden = true;
+        document.body.classList.remove('asm-drawer-open');
+        openAssemblyId = null;
+    }
+
+    document.querySelectorAll('.asm-edit-btn').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            event.stopPropagation();
+            openDrawer(button.dataset.assemblyId);
+        });
+    });
+    drawer.querySelectorAll('[data-drawer-close]').forEach(function (el) {
+        el.addEventListener('click', closeDrawer);
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && !drawer.hidden) { closeDrawer(); }
+    });
+
+    drawerSave.addEventListener('click', function () {
+        if (!openAssemblyId) { return; }
+        var rules = [];
+        var valid = true;
+        drawerBody.querySelectorAll('.asm-drawer-rule').forEach(function (row) {
+            var pct = parseFloat(row.querySelector('.asm-rule-waste').value);
+            if (isNaN(pct) || pct < 0 || pct > 100) { valid = false; return; }
+            rules.push({
+                id: parseInt(row.dataset.ruleId, 10),
+                material_id: parseInt(row.querySelector('.asm-rule-material').value, 10),
+                waste_factor: (pct / 100).toFixed(3),
+            });
+        });
+        if (!valid) {
+            drawerError.textContent = 'Waste must be between 0 and 100 percent.';
+            return;
+        }
+        drawerSave.disabled = true;
+        drawerError.textContent = '';
+        fetch(quickEditUrlBase.replace('0', openAssemblyId), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ rules: rules }),
+        })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (result) {
+                if (!result.ok) {
+                    drawerSave.disabled = false;
+                    drawerError.textContent = result.data.error || 'Save failed.';
+                    return;
+                }
+                window.location.reload();
+            })
+            .catch(function () {
+                drawerSave.disabled = false;
+                drawerError.textContent = 'Save failed.';
+            });
+    });
+})();
+</script>
+{% endblock %}

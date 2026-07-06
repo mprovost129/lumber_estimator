@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block title %}Delete Template{% endblock %}
+{% block meta_description %}Delete a project template.{% endblock %}
+
+{% block topbar_title %}Templates{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">Delete Template</h1>
+        <p class="page-subtitle">Remove this saved project default from your account.</p>
+    </div>
+</div>
+
+<div class="card p-3" style="max-width: 520px;">
+    <p class="mb-3">Delete <strong>{{ project_template.name }}</strong>?</p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-danger">Delete Template</button>
+            <a class="btn btn-outline-secondary" href="{% url 'projects:template-library' %}">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

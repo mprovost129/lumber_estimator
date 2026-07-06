@@ -1,0 +1,180 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ estimate.project.name }} - {{ estimate.name }}{% endblock %}
+{% block meta_description %}Material list for {{ estimate.project.name }}.{% endblock %}
+
+{% block extra_css %}
+<style>
+    @media print {
+        .no-print, nav, footer { display: none !important; }
+        .table { font-size: 12px; }
+        .card { border: none !important; }
+    }
+    .category-section + .category-section { margin-top: 1.25rem; }
+    .category-section-header { margin-bottom: 0.5rem; }
+    .drag-handle-section, .drag-handle-item { cursor: grab; color: var(--brand-text-muted); }
+    .drag-handle-section:active, .drag-handle-item:active { cursor: grabbing; }
+    .sortable-ghost { opacity: 0.4; }
+</style>
+{% endblock %}
+
+{% block topbar_title %}Material List{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <a class="text-muted small no-print" href="{% url 'projects:detail' estimate.project.pk %}"><i class="bi bi-arrow-left"></i> {{ estimate.project.name }}</a>
+        <h1 class="page-title">{{ estimate.project.name }}</h1>
+        <p class="page-subtitle">{{ estimate.name }} &middot; Material List</p>
+    </div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-4 no-print">
+    <a class="btn btn-primary" href="{% url 'estimating:estimate-csv' estimate.pk %}"><i class="bi bi-download"></i> Download CSV</a>
+    <button type="button" class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer"></i> Print</button>
+</div>
+
+<div class="quote-head">
+    <div>
+        <div class="quote-head-company">{{ estimate.project.account.name }}</div>
+        <div class="quote-head-doc">Material Order List</div>
+    </div>
+    <dl class="quote-head-meta mb-0">
+        <dt>Project</dt><dd>{{ estimate.project.name }}</dd>
+        {% if estimate.project.client %}<dt>Client</dt><dd>{{ estimate.project.client }}</dd>{% endif %}
+        <dt>Estimate</dt><dd>{{ estimate.name }}</dd>
+        <dt>Prepared</dt><dd>{% now "N j, Y" %}</dd>
+        <dt>Contact</dt><dd>{{ request.user.email }}</dd>
+    </dl>
+</div>
+
+<div class="card p-3 mb-4">
+    <h2 class="h5 mb-1">Order List</h2>
+    <p class="project-card-meta no-print">Grouped by system, product, and length - hand this to your lumber supplier for a quote.</p>
+    {% if order_list %}
+    <table class="table table-sm table-striped mb-0">
+        <thead>
+            <tr>
+                <th>System</th>
+                <th>Material</th>
+                <th>Dimension</th>
+                <th>Species / Grade</th>
+                <th>Length (ft)</th>
+                <th class="text-end">Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in order_list %}
+            <tr>
+                <td>{{ row.category_label }}</td>
+                <td>{{ row.material__name }}</td>
+                <td>{{ row.material__nominal_dimension }}</td>
+                <td>{{ row.material__species }} {{ row.material__grade }}</td>
+                <td>{% if row.length_ft %}{{ row.length_ft|floatformat:0 }}{% endif %}</td>
+                <td class="text-end">{{ row.total_quantity }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="mb-0">No material lines yet. Calibrate a plan page and draw with an assembly assigned, or add lines manually below.</p>
+    {% endif %}
+</div>
+
+<div class="no-print">
+{% if grouped_line_items %}
+<div class="card p-3 mb-4">
+    <div class="d-flex align-items-center justify-content-between mb-1">
+        <h2 class="h5 mb-0">Detail</h2>
+        <form method="post" action="{% url 'estimating:reset-layout-preferences' %}">
+            {% csrf_token %}
+            <input type="hidden" name="estimate_id" value="{{ estimate.pk }}">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Reset order</button>
+        </form>
+    </div>
+    <p class="project-card-meta">Drag <i class="bi bi-grip-vertical"></i> handles to reorder systems or items - your order is remembered for every estimate.</p>
+
+    <div id="category-sections" data-category-order-url="{% url 'estimating:category-order-update' %}">
+        {% for group in grouped_line_items %}
+        <section class="category-section" data-category="{{ group.key }}">
+            <div class="category-section-header d-flex align-items-center gap-2">
+                <span class="drag-handle-section" title="Drag to reorder systems"><i class="bi bi-grip-vertical"></i></span>
+                <h3 class="h6 mb-0">{{ group.label }}</h3>
+            </div>
+            <table class="table table-sm table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 2rem;"></th>
+                        <th>Role</th>
+                        <th>Material</th>
+                        <th>Length (ft)</th>
+                        <th class="text-end">Quantity</th>
+                        <th>Waste</th>
+                        <th>Source</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody class="item-list" data-item-order-url="{% url 'estimating:item-order-update' %}" data-category="{{ group.key }}">
+                    {% for item in group.items %}
+                    <tr data-role="{{ item.role }}">
+                        <td class="drag-handle-item"><i class="bi bi-grip-vertical"></i></td>
+                        <td>{{ item.role }}</td>
+                        <td>{{ item.material.name }}</td>
+                        <td>{% if item.length_ft %}{{ item.length_ft|floatformat:1 }}{% endif %}</td>
+                        <td class="text-end">{{ item.quantity }}</td>
+                        <td>{{ item.waste_factor }}</td>
+                        <td>{{ item.get_source_display }}</td>
+                        <td>
+                            {% if item.source == 'manual' %}
+                            <form method="post" action="{% url 'estimating:line-item-delete' item.pk %}" class="d-inline">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card p-3">
+    <h2 class="h5 mb-3">Add a Line Manually</h2>
+    <form method="post" action="{% url 'estimating:line-item-add' estimate.pk %}" class="row g-2">
+        {% csrf_token %}
+        <div class="col-md-3">
+            <label class="form-label" for="{{ manual_form.material.id_for_label }}">Material</label>
+            {{ manual_form.material }}
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="{{ manual_form.role.id_for_label }}">Label</label>
+            {{ manual_form.role }}
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="{{ manual_form.category.id_for_label }}">System</label>
+            {{ manual_form.category }}
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="{{ manual_form.quantity.id_for_label }}">Qty</label>
+            {{ manual_form.quantity }}
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="{{ manual_form.length_ft.id_for_label }}">Length (ft)</label>
+            {{ manual_form.length_ft }}
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <button type="submit" class="btn btn-primary">Add</button>
+        </div>
+    </form>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/sortable.min.js' %}"></script>
+<script src="{% static 'estimating/estimate_detail.js' %}"></script>
+{% endblock %}

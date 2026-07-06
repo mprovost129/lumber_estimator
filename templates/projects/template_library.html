@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+
+{% block title %}Project Templates{% endblock %}
+{% block meta_description %}Reusable project defaults.{% endblock %}
+
+{% block topbar_title %}Templates{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">Project Templates</h1>
+        <p class="page-subtitle">Create reusable defaults for the kinds of houses you estimate most often.</p>
+    </div>
+    <div class="page-head-actions">
+        <a class="btn btn-primary" href="{% url 'projects:template-create' %}"><i class="bi bi-plus-lg"></i> New Template</a>
+        <a class="btn btn-outline-secondary" href="{% url 'projects:create' %}"><i class="bi bi-folder-plus"></i> New Project</a>
+    </div>
+</div>
+
+{% if templates %}
+<div class="project-card-grid">
+    {% for template_item in templates %}
+    <div class="project-card">
+        <div class="d-flex align-items-start justify-content-between gap-2">
+            <div>
+                <div class="project-card-title">{{ template_item.name }}</div>
+                {% if template_item.description %}<div class="project-card-meta mt-1">{{ template_item.description }}</div>{% endif %}
+            </div>
+            {% if template_item.is_system %}
+            <span class="pill"><i class="bi bi-stars"></i> Starter</span>
+            {% else %}
+            <span class="pill"><i class="bi bi-person-badge"></i> Yours</span>
+            {% endif %}
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <span class="tag">{{ template_item.num_floors }} floor{{ template_item.num_floors|pluralize }}</span>
+            <span class="tag">{{ template_item.get_foundation_type_display }}</span>
+            <span class="tag">1st: {{ template_item.first_floor_wall_height_in }} in</span>
+            {% if template_item.second_floor_wall_height_in %}<span class="tag">2nd: {{ template_item.second_floor_wall_height_in }} in</span>{% endif %}
+        </div>
+        <div class="d-flex flex-wrap gap-2 mt-auto">
+            <a class="btn btn-sm btn-primary" href="{% url 'projects:create' %}?template={{ template_item.pk }}">Use for Project</a>
+            {% if not template_item.is_system %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'projects:template-update' template_item.pk %}">Edit</a>
+            <a class="btn btn-sm btn-outline-danger" href="{% url 'projects:template-delete' template_item.pk %}">Delete</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <i class="bi bi-journal-plus" style="font-size: 2rem;"></i>
+    <p class="mb-3 mt-2">No custom templates yet. Create one from scratch or save an existing project's settings.</p>
+    <a class="btn btn-primary" href="{% url 'projects:template-create' %}"><i class="bi bi-plus-lg"></i> New Template</a>
+</div>
+{% endif %}
+{% endblock %}
