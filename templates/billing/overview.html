@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+
+{% block title %}Billing{% endblock %}
+{% block meta_description %}Billing options for Lumber Estimator.{% endblock %}
+{% block topbar_title %}Billing{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">Billing</h1>
+        <p class="page-subtitle">Free to measure and build estimates. Pay when you need print/export output, or subscribe for unlimited output.</p>
+    </div>
+    <div class="d-flex gap-2">
+        {% if billing_enabled %}
+        <form method="post" action="{% url 'billing:portal' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-secondary">Open customer portal</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-4">
+        <div class="card h-100 p-3">
+            <h2 class="h5 mb-2">{{ estimate_unlock_offer.name }}</h2>
+            <div class="fs-4 fw-semibold mb-2">{{ estimate_unlock_offer.price_label }}</div>
+            <p class="project-card-meta mb-0">{{ estimate_unlock_offer.description }}</p>
+        </div>
+    </div>
+    {% for plan in plans %}
+    <div class="col-lg-4">
+        <div class="card h-100 p-3">
+            <h2 class="h5 mb-2">{{ plan.name }}</h2>
+            <div class="fs-4 fw-semibold mb-2">{{ plan.price_label }}</div>
+            <p class="project-card-meta">{{ plan.description }}</p>
+            <form method="post" action="{% url 'billing:subscribe' plan.slug %}" class="mt-auto">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary w-100" {% if not plan.enabled %}disabled{% endif %}>Subscribe</button>
+            </form>
+            {% if not plan.enabled %}
+            <p class="small text-muted mt-2 mb-0">Add this plan's Stripe price ID in settings to enable checkout.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="card p-3">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h2 class="h5 mb-0">Recent estimates</h2>
+        <span class="small text-muted">Unlocked output applies here automatically after payment or subscription sync.</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Estimate</th>
+                    <th>Project</th>
+                    <th>Status</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in estimate_rows %}
+                <tr>
+                    <td><a href="{% url 'estimating:estimate-detail' row.estimate.pk %}">{{ row.estimate.name }}</a></td>
+                    <td>{{ row.estimate.project.name }}</td>
+                    <td>
+                        {% if row.access.can_access %}
+                        <span class="badge text-bg-success">{{ row.access.label }}</span>
+                        {% else %}
+                        <span class="badge text-bg-secondary">Locked</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if row.access.can_access %}
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'estimating:estimate-print' row.estimate.pk %}">Open print view</a>
+                        {% else %}
+                        <form method="post" action="{% url 'billing:estimate-checkout' row.estimate.pk %}" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-primary" {% if not billing_enabled %}disabled{% endif %}>Unlock estimate</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" class="text-muted">No estimates yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

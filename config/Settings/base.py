@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'users',
     'core',
     'accounts',
+    'billing',
     'catalog',
     'projects',
     'plans',
@@ -164,3 +165,32 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'webmaster@localhost')
+
+APP_BASE_URL = os.environ.get('APP_BASE_URL', 'http://localhost:8000')
+STRIPE_SECRET_KEY = os.environ.get('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLISHABLE_KEY = os.environ.get('STRIPE_PUBLISHABLE_KEY', '')
+STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+
+BILLING_ESTIMATE_UNLOCK = {
+    'name': 'Single estimate unlock',
+    'price_label': os.environ.get('BILLING_ESTIMATE_UNLOCK_LABEL', '$9 per estimate'),
+    'description': 'Unlock print-friendly output and CSV export for one estimate.',
+    'price_id': os.environ.get('STRIPE_PRICE_ESTIMATE_UNLOCK', ''),
+}
+
+BILLING_SUBSCRIPTION_PLANS = [
+    {
+        'slug': 'starter',
+        'name': 'Starter',
+        'price_label': os.environ.get('BILLING_STARTER_LABEL', '$29 / month'),
+        'description': 'Unlimited print/export for one account and ongoing access to the customer portal.',
+        'price_id': os.environ.get('STRIPE_PRICE_STARTER', ''),
+    },
+    {
+        'slug': 'pro',
+        'name': 'Pro',
+        'price_label': os.environ.get('BILLING_PRO_LABEL', '$79 / month'),
+        'description': 'Unlimited print/export plus room for higher-volume estimating teams.',
+        'price_id': os.environ.get('STRIPE_PRICE_PRO', ''),
+    },
+]

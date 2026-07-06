@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
+from django.urls import reverse
 
 from accounts.models import Account, AccountScopedManager
 
@@ -206,3 +207,6 @@ class Estimate(models.Model):
 
     def __str__(self):
         return f'{self.project.name} - {self.name}'
+
+    def get_absolute_url(self):
+        return reverse('estimating:estimate-detail', args=[self.pk])

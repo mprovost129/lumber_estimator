@@ -6,11 +6,6 @@
 
 {% block extra_css %}
 <style>
-    @media print {
-        .no-print, nav, footer { display: none !important; }
-        .table { font-size: 12px; }
-        .card { border: none !important; }
-    }
     .category-section + .category-section { margin-top: 1.25rem; }
     .category-section-header { margin-bottom: 0.5rem; }
     .drag-handle-section, .drag-handle-item { cursor: grab; color: var(--brand-text-muted); }
@@ -30,9 +25,35 @@
 </div>
 
 <div class="d-flex flex-wrap gap-2 mb-4 no-print">
+    {% if estimate_access.can_access %}
     <a class="btn btn-primary" href="{% url 'estimating:estimate-csv' estimate.pk %}"><i class="bi bi-download"></i> Download CSV</a>
-    <button type="button" class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer"></i> Print</button>
+    <a class="btn btn-outline-secondary" href="{% url 'estimating:estimate-print' estimate.pk %}"><i class="bi bi-printer"></i> Print-friendly view</a>
+    {% else %}
+    <form method="post" action="{% url 'billing:estimate-checkout' estimate.pk %}" class="d-inline">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary"><i class="bi bi-unlock"></i> Unlock export + print</button>
+    </form>
+    <a class="btn btn-outline-secondary" href="{% url 'billing:overview' %}"><i class="bi bi-credit-card"></i> Subscription options</a>
+    {% endif %}
 </div>
+
+{% if not estimate_access.can_access %}
+<div class="card p-3 mb-4 no-print">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+            <h2 class="h5 mb-1">Output is locked</h2>
+            <p class="project-card-meta mb-0">This estimate stays free to build and review. Pay once to unlock this estimate's CSV + print output, or subscribe for unlimited output across the account.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <form method="post" action="{% url 'billing:estimate-checkout' estimate.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary"><i class="bi bi-unlock"></i> Unlock this estimate</button>
+            </form>
+            <a class="btn btn-outline-secondary" href="{% url 'billing:overview' %}">Compare plans</a>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <div class="quote-head">
     <div>

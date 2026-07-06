@@ -26,8 +26,11 @@
     </nav>
 
     <div class="rail-foot">
-        <a class="rail-link" href="{% url 'logout' %}">
-            <i class="bi bi-box-arrow-right"></i><span>Log out</span>
-        </a>
+        <form method="post" action="{% url 'logout' %}" class="rail-logout-form">
+            {% csrf_token %}
+            <button type="submit" class="rail-link rail-link-button">
+                <i class="bi bi-box-arrow-right"></i><span>Log out</span>
+            </button>
+        </form>
     </div>
 </aside>

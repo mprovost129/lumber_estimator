@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A public, multi-tenant web application for building lumber material lists and estimates for construction projects. Users import project plans (images/PDFs) and trace structural elements (walls, floors, roof lines, openings) directly on the plan. Traced elements are assigned to material "tools" (e.g., a Wall tool) that automatically calculate required lumber using standard framing techniques and the project's job settings (stud spacing, floor heights, etc.). Users can also add manual material lines directly, independent of any plan trace. The primary deliverable is a clean, exportable material list that a user can hand to a lumber company for quoting. Pricing is optional: if a user has prices, the app totals them; if not, the material list stands on its own.
+A public, multi-tenant web application for building lumber material lists and estimates for construction projects. Users import project plans (images/PDFs) and trace structural elements (walls, floors, roof lines, openings) directly on the plan. Traced elements are assigned to material "tools" (e.g., a Wall tool) that automatically calculate required lumber using standard framing techniques and the project's job settings (stud spacing, floor heights, etc.). Users can also add manual material lines directly, independent of any plan trace. The primary deliverable is a clean material list that a user can hand to a lumber company for quoting. Estimate creation and review remain free; print-friendly output and CSV export are now the first paid surfaces.
 
 ## Tech Stack
 
@@ -13,7 +13,7 @@ A public, multi-tenant web application for building lumber material lists and es
 - **Frontend:** Django templates + HTMX for dynamic line item editing, plus Fabric.js (via CDN, no JS build step) for the plan-tracing canvas
 - **PDF/image processing:** Plans can be uploaded as PDF or a plain image (PNG/JPEG). PDFs are rasterized page-by-page with PyMuPDF (`fitz`) into per-page PNGs server-side at upload time; a plain image upload becomes a single page directly (re-encoded to PNG, no PyMuPDF resampling). Pillow generates thumbnails either way.
 - **Static files:** WhiteNoise (prod only, via `CompressedManifestStaticFilesStorage`)
-- **Payments:** Stripe (subscriptions; tiers TBD)
+- **Payments:** Stripe Checkout + customer portal + webhooks, with both one-time estimate unlocks and account subscriptions
 - **Deployment:** Render (web service + managed Postgres), gunicorn (Dockerfile + docker-compose also present for containerized dev/deploy)
 - **Environment config:** `python-dotenv` loads `.env` into `os.environ`; settings read directly via `os.environ`
 
@@ -31,7 +31,7 @@ A public, multi-tenant web application for building lumber material lists and es
 2. From the Dashboard, **New Project** (`projects:create`) opens the built 3-step setup wizard (Project / Structure / Framing) and now also shows reusable **Project Templates**. Starter templates seed common house types, account-owned templates can be saved from job settings, and the wizard automatically preselects the user's favorite template when available or the first starter/default template otherwise.
 3. The **Project Detail** page (`projects:detail`) lists the project's uploaded **Plans**, each as a thumbnail gallery of its **PlanPages** with an inline label field (e.g. "First Floor") and a **Delete Page** button (`plans:page-delete`) - not every page in an uploaded PDF package is wanted, so pages can be trimmed individually without re-uploading or discarding the whole Plan. Upload now defaults to **Upload and Open**, which jumps straight into the first generated page in the viewer and prompts the user to calibrate instead of bouncing back through project detail. Deleting a page cascades its Traces and their LineItems (same FK cascade as deleting a Trace directly) and removes its image/thumbnail files from storage; the parent Plan is left in place even with zero pages remaining.
 4. Clicking a thumbnail (or landing there immediately after upload) opens the **Plan Viewer** (`plans:viewer`) - a Fabric.js canvas over that page's image. Before quantities can be computed, the page must be **calibrated**: the Calibrate tool draws a reference line and the user enters its real-world length in feet, setting `PlanPage.scale_pixels_per_foot`. The user then picks the **Line/Wall tool**, sets Material and/or Assembly + settings (e.g. stud spacing) in the settings panel, and draws; each draw creates a **Trace** with that material/assembly/settings snapshotted onto it. If an Assembly is assigned, the calculation engine runs immediately against the trace's real measured length (from geometry + the page's calibration), generating `LineItem`s on the project's `Estimate`. Saved **ToolPresets** let a configured tool+material be reloaded later, and editing a selected trace in the inspector now auto-saves after a short debounce while keeping a manual **Save now** fallback.
-5. The **Estimate/BOM view** (`estimating:estimate-detail`, linked from the project detail page) lists the computed `LineItem`s - the actual material list - and tool-generated rows now include a **Jump to source** link back to the exact plan page/trace that created them.
+5. The **Estimate/BOM view** (`estimating:estimate-detail`, linked from the project detail page) lists the computed `LineItem`s - the actual material list - and tool-generated rows now include a **Jump to source** link back to the exact plan page/trace that created them. Export and print are paywalled here: free users can still build and review estimates, then either unlock one estimate or subscribe for account-wide output access.
 6. Completed Projects can be **Archived** from the Dashboard (soft-hide, not delete).
 
 ## Intelligent Material / Assembly Drawing Direction
@@ -217,7 +217,7 @@ The viewer sidebar's raw geometry tools (Line, Area, Polyline, Count, Opening, C
 
 ## Exports
 
-- **Built.** The Estimate detail page (`estimating.EstimateDetailView`) shows two tables: an **Order List** (`_grouped_order_list()` groups line items by product + piece length with `Sum('quantity')`, the supplier-ready view) and a **Detail** table (per-line role/material/length/qty/waste/source with a Remove button on manual lines). A print stylesheet hides everything but the order list for a clean hard copy.
+- **Built.** The Estimate detail page (`estimating.EstimateDetailView`) shows two tables: an **Order List** (`_grouped_order_list()` groups line items by product + piece length with `Sum('quantity')`, the supplier-ready view) and a **Detail** table (per-line role/material/length/qty/waste/source with a Remove button on manual lines). The detail page itself is no longer the printable deliverable; print-friendly output moved to a dedicated paid route (`estimating:estimate-print`) so "free to estimate, pay to print/export" is enforceable.
 - **CSV** export at `estimating:estimate-csv` (`estimates/<pk>/export.csv`) streams the same grouped order list with a `Content-Disposition` attachment filename, so a lumber yard can quote directly from it.
 - **Manual lines** (`ManualLineItemForm` + `ManualLineItemCreateView`/`ManualLineItemDeleteView`) coexist with tool-generated lines; delete is restricted to `source="manual"` lines (tool lines are owned by their trace and would reappear on regeneration).
 - Prices and totals appear on exports only if the estimate has pricing (still optional and undetermined).
@@ -225,8 +225,11 @@ The viewer sidebar's raw geometry tools (Line, Area, Polyline, Count, Opening, C
 
 ## Billing
 
-- Stripe powers Account subscriptions.
-- Subscription tiers, pricing, and feature gating are not yet defined - build the Account/subscription model to support tiered limits later rather than hardcoding a single tier.
+- Stripe powers both one-time estimate unlocks and account subscriptions.
+- Billing is now backed by a dedicated `billing` app: `AccountBillingProfile` stores the Stripe customer id, `AccountSubscription` stores synced recurring access, `EstimateAccessGrant` stores per-estimate unlocks, and `StripeWebhookEvent` provides basic webhook idempotency.
+- Stripe Checkout is used for both payment modes. `billing/services.py` creates Checkout Sessions, creates the Stripe customer on first purchase, and syncs subscription state from Stripe webhooks (`checkout.session.completed` plus `customer.subscription.*`).
+- Billing configuration is environment-driven in `config/Settings/base.py`: `APP_BASE_URL`, `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ESTIMATE_UNLOCK`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`, plus optional display labels for the pricing page.
+- The current starter plan catalog is intentionally simple: one one-time unlock plus `starter` and `pro` subscriptions. The price ids are env-backed so pricing can change without a schema change.
 
 ## Project Structure
 
@@ -238,7 +241,8 @@ lumber_estimator/
 │   └── Settings/         # base.py, dev.py, prod.py (note capital "Settings")
 ├── core/                 # existing: home page / marketing views
 ├── users/                # existing: custom User model, manager, admin
-├── accounts/             # Account (tenant), AccountScopedManager; Stripe subscriptions still TBD
+├── accounts/             # Account (tenant), AccountScopedManager
+├── billing/              # Stripe customer/profile state, subscriptions, estimate unlocks, checkout/webhook services
 ├── projects/             # Project, JobSettings, Estimate models; Dashboard/Create/Detail views (wizard still TBD)
 ├── plans/                # Plan, PlanPage, Trace, ToolPreset; upload/rasterize/viewer/trace/preset views
 ├── catalog/              # MaterialProduct, MaterialLength/Material Database, optional PriceEntry
@@ -296,8 +300,7 @@ docker-compose up --build
 - Recalculation behavior: `generate_line_items()` already replaces a trace's own previously-generated lines on regeneration (never touches manual lines), but there's no trigger yet for *when* that should re-run (e.g. on `JobSettings` change) or whether a user should be warned before a regeneration changes quantities they'd already reviewed.
 - Per-use-case default length overrides in the Material Database (e.g., rim board at 16' vs. a product's general default) - not yet modeled.
 - Full list of standard framing rules/tables to encode per Tool (wall, floor joist, beam, rafter, truss, header) - need an engineering reference or source to encode against.
-- Stripe subscription tiers, pricing, and feature gating - TBD.
-- Export formats beyond the built printable view + CSV: PDF? Excel? Email directly to a supplier?
+- Export formats beyond CSV + the paid print-friendly view: PDF? Excel? Email directly to a supplier?
 - Free vs paid tiers, estimate limits, or fully free at launch?
 
 ## Intelligent Wall Assembly Viewer - Phase 2
@@ -526,6 +529,33 @@ Two navigation loops were tightened to reduce hunting:
 - `plans.PlanUploadView` now defaults to `open_after_upload=1`. After rasterization, it redirects straight to the first generated `PlanPage` viewer and flashes a calibration prompt. The old "stay on project detail" behavior still exists for callers that post `open_after_upload=0`.
 - Tool-generated rows on `estimating:estimate-detail` now show `Jump to source` when `LineItem.trace` exists. The link targets the owning plan page with `?trace=<trace id>`, e.g. `plans:viewer(page_id)?trace=123`.
 - `plans/static/plans/viewer.js` reads that `trace` query parameter on load, finds the matching Fabric object after the page image and traces are rendered, selects it, and opens the inspector automatically. This is intentionally lightweight: no new backend endpoint was needed because the page already serializes every visible trace into `traces-data`.
+
+## Billing foundation + paywalled output
+
+The first monetization slice is now wired into the product flow instead of living only in notes.
+
+- New `billing` app:
+  - `AccountBillingProfile`: one Stripe customer per account.
+  - `AccountSubscription`: recurring plan state synced from Stripe.
+  - `EstimateAccessGrant`: one-time estimate unlocks for print/export.
+  - `StripeWebhookEvent`: processed-event log for idempotent webhook handling.
+- Stripe integration shape:
+  - `billing/services.py` centralizes Checkout Session creation, customer creation, access checks, and webhook sync helpers.
+  - The implementation uses Stripe Checkout for both one-time and subscription purchases, plus Stripe's customer portal for self-serve billing management.
+  - Webhook handling currently recognizes `checkout.session.completed` and `customer.subscription.created|updated|deleted`; that is the minimum sync path needed so subscription changes made in Stripe or the portal are reflected in-app.
+- UX/paywall changes:
+  - `estimating:estimate-detail` remains free to view, but direct CSV export and print are replaced with unlock / subscribe actions until the estimate or account has paid access.
+  - `estimating:estimate-print` is a dedicated printable route and requires paid output access.
+  - `billing:overview` is the in-app pricing and billing hub, showing one-time unlocks, subscription plans, portal access, and recent estimate access state.
+  - `projects:detail` now points users to billing/export options instead of offering a free CSV button.
+- Current assumptions:
+  - One paid estimate unlock covers both CSV export and print-friendly output for that estimate.
+  - Any active/trialing/past-due subscription unlocks output account-wide for now. If stricter plan limits are introduced later, enforce them in `billing/services.py` instead of sprinkling checks through templates.
+- Recommended next monetization steps:
+  - Add a post-payment success treatment on the estimate page so the unlock feels immediate and trustworthy.
+  - Expand webhook coverage for refunds / charge disputes if one-time unlocks need to be revoked automatically.
+  - Decide whether PDF export belongs in the one-time unlock or only in subscriptions before building another paid surface.
+  - Add team-aware subscription limits once multi-user accounts land.
 
 ## Trace inspector auto-save
 

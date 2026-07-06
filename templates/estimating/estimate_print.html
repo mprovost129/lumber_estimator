@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ estimate.project.name }} - Print Material List{% endblock %}
+{% block meta_description %}Printable material list for {{ estimate.project.name }}.{% endblock %}
+
+{% block extra_css %}
+<style>
+    @media print {
+        .no-print, nav, footer { display: none !important; }
+        .card { border: none !important; box-shadow: none !important; }
+        .table { font-size: 12px; }
+        main { padding: 0 !important; }
+    }
+</style>
+{% endblock %}
+
+{% block topbar_title %}Print Material List{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+    <div>
+        <a class="text-muted small" href="{% url 'estimating:estimate-detail' estimate.pk %}"><i class="bi bi-arrow-left"></i> Back to estimate</a>
+        <h1 class="page-title">{{ estimate.project.name }}</h1>
+        <p class="page-subtitle">{{ estimate.name }} &middot; Print-friendly view</p>
+    </div>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-primary" onclick="window.print()"><i class="bi bi-printer"></i> Print now</button>
+    </div>
+</div>
+
+<div class="quote-head">
+    <div>
+        <div class="quote-head-company">{{ estimate.project.account.name }}</div>
+        <div class="quote-head-doc">Material Order List</div>
+    </div>
+    <dl class="quote-head-meta mb-0">
+        <dt>Project</dt><dd>{{ estimate.project.name }}</dd>
+        {% if estimate.project.client %}<dt>Client</dt><dd>{{ estimate.project.client }}</dd>{% endif %}
+        <dt>Estimate</dt><dd>{{ estimate.name }}</dd>
+        <dt>Prepared</dt><dd>{% now "N j, Y" %}</dd>
+        <dt>Contact</dt><dd>{{ request.user.email }}</dd>
+    </dl>
+</div>
+
+<div class="card p-3">
+    <h2 class="h5 mb-3">Order List</h2>
+    <table class="table table-sm table-striped mb-0">
+        <thead>
+            <tr>
+                <th>System</th>
+                <th>Material</th>
+                <th>Dimension</th>
+                <th>Species / Grade</th>
+                <th>Length (ft)</th>
+                <th class="text-end">Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in order_list %}
+            <tr>
+                <td>{{ row.category_label }}</td>
+                <td>{{ row.material__name }}</td>
+                <td>{{ row.material__nominal_dimension }}</td>
+                <td>{{ row.material__species }} {{ row.material__grade }}</td>
+                <td>{% if row.length_ft %}{{ row.length_ft|floatformat:0 }}{% endif %}</td>
+                <td class="text-end">{{ row.total_quantity }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+

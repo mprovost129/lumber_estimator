@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from billing.models import AccountSubscription, EstimateAccessGrant
 from catalog.models import MaterialProduct
 from plans.models import Trace
 from plans.test_traces import make_plan_page
@@ -63,6 +64,24 @@ class EstimateDetailViewTests(TestCase):
         response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
 
         self.assertContains(response, f'{reverse("plans:viewer", args=[page.pk])}?trace={trace.pk}')
+
+    def test_locked_estimate_shows_unlock_actions(self):
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
+        self.assertContains(response, 'Unlock export + print')
+        self.assertNotContains(response, 'Download CSV')
+
+    def test_active_subscription_restores_export_actions(self):
+        AccountSubscription.objects.create(
+            account=self.user_a.account,
+            stripe_subscription_id='sub_123',
+            plan_slug='starter',
+            status=AccountSubscription.Status.ACTIVE,
+        )
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
+        self.assertContains(response, 'Download CSV')
+        self.assertContains(response, 'Print-friendly view')
 
 
 class EstimateMaterialSummaryViewTests(TestCase):
@@ -161,6 +180,12 @@ class EstimateCsvExportViewTests(TestCase):
         )
 
     def test_csv_groups_and_sums_matching_lines(self):
+        EstimateAccessGrant.objects.create(
+            estimate=self.estimate_a,
+            purchased_by=self.user_a,
+            status=EstimateAccessGrant.Status.PAID,
+            stripe_checkout_session_id='cs_paid',
+        )
         self.client.force_login(self.user_a)
         response = self.client.get(reverse('estimating:estimate-csv', args=[self.estimate_a.pk]))
 
@@ -177,6 +202,12 @@ class EstimateCsvExportViewTests(TestCase):
         self.assertEqual(rows[1][5], '14')
 
     def test_cannot_export_other_accounts_estimate(self):
+        EstimateAccessGrant.objects.create(
+            estimate=self.estimate_a,
+            purchased_by=self.user_a,
+            status=EstimateAccessGrant.Status.PAID,
+            stripe_checkout_session_id='cs_other',
+        )
         self.client.force_login(self.user_a)
         response = self.client.get(reverse('estimating:estimate-csv', args=[self.estimate_b.pk]))
         self.assertEqual(response.status_code, 404)
@@ -184,6 +215,43 @@ class EstimateCsvExportViewTests(TestCase):
     def test_requires_login(self):
         response = self.client.get(reverse('estimating:estimate-csv', args=[self.estimate_a.pk]))
         self.assertEqual(response.status_code, 302)
+
+    def test_locked_export_redirects_back_to_estimate(self):
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-csv', args=[self.estimate_a.pk]))
+        self.assertRedirects(response, reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
+
+
+class EstimatePrintViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='print@example.com', password='testpass123')
+        self.project = Project.objects.create(account=self.user.account, name='Print House')
+        self.estimate = Estimate.objects.create(project=self.project)
+        self.material = MaterialProduct.objects.create(
+            name='Print Stud', input_type=MaterialProduct.InputType.FT,
+        )
+        LineItem.objects.create(
+            estimate=self.estimate, material=self.material, role='Stud', quantity=8,
+            source=LineItem.Source.TOOL,
+        )
+
+    def test_locked_print_redirects(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('estimating:estimate-print', args=[self.estimate.pk]))
+        self.assertRedirects(response, reverse('estimating:estimate-detail', args=[self.estimate.pk]))
+
+    def test_unlocked_print_renders(self):
+        EstimateAccessGrant.objects.create(
+            estimate=self.estimate,
+            purchased_by=self.user,
+            status=EstimateAccessGrant.Status.PAID,
+            stripe_checkout_session_id='cs_print',
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('estimating:estimate-print', args=[self.estimate.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Print now')
+        self.assertContains(response, 'Print Stud')
 
 
 class ManualLineItemViewTests(TestCase):

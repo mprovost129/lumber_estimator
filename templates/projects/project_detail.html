@@ -20,7 +20,7 @@
     <a class="btn btn-accent" href="{% url 'projects:start-takeoff' project.pk %}"><i class="bi bi-lightning-charge"></i> Start Takeoff</a>
     {% if estimate %}
     <a class="btn btn-primary" href="{% url 'estimating:estimate-detail' estimate.pk %}"><i class="bi bi-list-check"></i> View Material List</a>
-    <a class="btn btn-outline-primary" href="{% url 'estimating:estimate-csv' estimate.pk %}"><i class="bi bi-download"></i> Download CSV</a>
+    <a class="btn btn-outline-primary" href="{% url 'billing:overview' %}"><i class="bi bi-credit-card"></i> Export / Print Options</a>
     {% endif %}
     <a class="btn btn-outline-secondary" href="{% url 'projects:job-settings' project.pk %}"><i class="bi bi-gear"></i> Job Settings</a>
 </div>

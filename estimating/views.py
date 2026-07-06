@@ -16,6 +16,7 @@ from django.views import View
 from django.views.generic import CreateView, DetailView, TemplateView
 
 from accounts.models import Account
+from billing.services import estimate_output_access
 from projects.models import Estimate
 
 from .forms import AssemblyForm, CalculationRuleFormSet, FormulaForm, ManualLineItemForm
@@ -198,6 +199,7 @@ class EstimateDetailView(LoginRequiredMixin, DetailView):
         context['grouped_line_items'] = grouped_line_items
         context['order_list'] = _grouped_order_list(self.object)
         context['manual_form'] = ManualLineItemForm(account=account)
+        context['estimate_access'] = estimate_output_access(self.object)
         return context
 
 
@@ -243,6 +245,13 @@ class EstimateCsvExportView(LoginRequiredMixin, View):
 
     def get(self, request, pk):
         estimate = get_object_or_404(Estimate.objects.for_account(request.user.account), pk=pk)
+        access = estimate_output_access(estimate)
+        if not access['can_access']:
+            messages.info(
+                request,
+                'Export is unlocked per estimate or through a subscription. Choose an option below to continue.',
+            )
+            return redirect('estimating:estimate-detail', pk=estimate.pk)
         response = HttpResponse(content_type='text/csv')
         filename = f'{estimate.project.name} - {estimate.name} - materials.csv'
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -260,6 +269,32 @@ class EstimateCsvExportView(LoginRequiredMixin, View):
                 row['total_quantity'],
             ])
         return response
+
+
+class EstimatePrintView(LoginRequiredMixin, DetailView):
+    model = Estimate
+    template_name = 'estimating/estimate_print.html'
+    context_object_name = 'estimate'
+
+    def get_queryset(self):
+        return Estimate.objects.for_account(self.request.user.account)
+
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        access = estimate_output_access(self.object)
+        if not access['can_access']:
+            messages.info(
+                request,
+                'Print-friendly output is unlocked per estimate or through a subscription.',
+            )
+            return redirect('estimating:estimate-detail', pk=self.object.pk)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['order_list'] = _grouped_order_list(self.object)
+        context['estimate_access'] = estimate_output_access(self.object)
+        return context
 
 
 class CategoryOrderUpdateView(LoginRequiredMixin, View):

@@ -39,6 +39,18 @@ class DashboardTenancyTests(TestCase):
         response = self.client.get(reverse('projects:dashboard'))
         self.assertEqual(response.status_code, 302)
 
+    def test_dashboard_renders_post_logout_form_and_logout_succeeds(self):
+        self.client.force_login(self.user_a)
+
+        response = self.client.get(reverse('projects:dashboard'))
+
+        self.assertContains(response, 'action="/accounts/logout/"')
+        self.assertContains(response, 'method="post"', html=False)
+
+        logout_response = self.client.post(reverse('logout'))
+        self.assertEqual(logout_response.status_code, 302)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
     def test_dashboard_shows_next_step_when_no_plans_uploaded(self):
         self.client.force_login(self.user_a)
 
