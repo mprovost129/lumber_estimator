@@ -172,6 +172,41 @@ class TraceAssemblyWiringTests(TestCase):
         self.assertContains(response, 'Wire 2x6')
         self.assertContains(response, '9')
         self.assertContains(response, f'data-trace-ids="{trace_id}"')
+        self.assertContains(response, '1 trace')
+        self.assertContains(response, 'data-material-label="Wire 2x6 - Stud - 10 ft"')
+
+    def test_material_summary_can_limit_rows_to_current_page(self):
+        other_page = make_plan_page(self.project, label='Second Page')
+        other_page.scale_pixels_per_foot = Decimal('30')
+        other_page.save(update_fields=['scale_pixels_per_foot'])
+
+        self.client.force_login(self.user)
+        first_response = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'line', 'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}],
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+            }),
+            content_type='application/json',
+        )
+        second_response = self.client.post(
+            reverse('plans:trace-create', args=[other_page.pk]),
+            data=json.dumps({
+                'tool_type': 'line', 'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}],
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+            }),
+            content_type='application/json',
+        )
+        summary_url = reverse('estimating:estimate-material-summary', args=[self.estimate.pk])
+
+        response = self.client.get(f'{summary_url}?current_page_id={self.page.pk}')
+        self.assertContains(response, f'data-trace-ids="{first_response.json()["id"]}"')
+        self.assertNotContains(response, f'data-trace-ids="{second_response.json()["id"]}"')
+        self.assertContains(response, 'Links to 1 on this page of 2 traced elements')
+
+        page_only_response = self.client.get(f'{summary_url}?current_page_id={self.page.pk}&page_only=1')
+        self.assertContains(page_only_response, '9')
+        self.assertContains(page_only_response, 'Links to 1 traced element')
 
     def test_create_trace_with_assembly_requires_calibration(self):
         self.page.scale_pixels_per_foot = None

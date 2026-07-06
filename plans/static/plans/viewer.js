@@ -71,7 +71,22 @@ document.addEventListener('DOMContentLoaded', function () {
     var closedInput = document.getElementById('closed-input');
     var presetSelect = document.getElementById('preset-select');
     var presetNameInput = document.getElementById('preset-name-input');
+    var toolMemoryStatus = document.getElementById('tool-memory-status');
+    var toolMemoryToggleButton = document.getElementById('tool-memory-toggle');
+    var toolMemoryClearButton = document.getElementById('tool-memory-clear');
     var deleteButton = document.getElementById('delete-selected');
+    var materialPageScopeButton = document.getElementById('material-page-scope');
+    var materialFocusLinkedButton = document.getElementById('material-focus-linked');
+    var materialSelectedOnlyButton = document.getElementById('material-selected-only');
+    var materialCategoryOnlyButton = document.getElementById('material-category-only');
+    var materialPrevLinkedButton = document.getElementById('material-prev-linked');
+    var materialNextLinkedButton = document.getElementById('material-next-linked');
+    var materialClearLinkedButton = document.getElementById('material-clear-linked');
+    var materialListStatus = document.getElementById('material-list-status');
+    var selectionSummary = document.getElementById('selection-summary');
+    var deleteUndoBanner = document.getElementById('delete-undo-banner');
+    var deleteUndoText = document.getElementById('delete-undo-text');
+    var undoDeleteTraceButton = document.getElementById('undo-delete-trace');
 
     var inspectorTitle = document.getElementById('inspector-title');
     var inspectorMeasurement = document.getElementById('inspector-measurement');
@@ -121,6 +136,14 @@ document.addEventListener('DOMContentLoaded', function () {
     var previewObject = null;      // rubber-band preview while drawing
     var selectedTrace = null;
     var linkedTraceIds = [];
+    var hoveredTraceIds = [];
+    var activeMaterialSummary = null;
+    var activeLinkedTraceIndex = -1;
+    var materialSummaryPageOnly = false;
+    var focusLinkedMode = false;
+    var materialSelectedOnly = false;
+    var materialCategoryOnly = false;
+    var lastDeletedTraceSnapshot = null;
     var isPanning = false;         // hand tool: click-drag in progress
     var panStart = null;
     var inspectorSyncing = false;
@@ -146,15 +169,24 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!MATERIAL_SUMMARY_URL) {
             return;
         }
-        fetch(MATERIAL_SUMMARY_URL, { headers: { 'X-CSRFToken': csrftoken } })
+        var summaryUrl = new URL(MATERIAL_SUMMARY_URL, window.location.origin);
+        if (PAGE_ID) {
+            summaryUrl.searchParams.set('current_page_id', PAGE_ID);
+        }
+        if (materialSummaryPageOnly) {
+            summaryUrl.searchParams.set('page_only', '1');
+        }
+        fetch(summaryUrl.toString(), { headers: { 'X-CSRFToken': csrftoken } })
             .then(function (response) { return response.text(); })
             .then(function (html) {
                 document.getElementById('material-list-content').innerHTML = html;
                 syncMaterialListSelection();
+                updateMaterialToolbarState();
             })
             .catch(function () { /* not on the critical path - the panel just stays stale */ });
     }
     refreshMaterialList();
+    updateMaterialToolbarState();
 
     document.getElementById('material-list-content').addEventListener('click', function (event) {
         var row = event.target.closest('.material-summary-row');
@@ -165,7 +197,80 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!traceIds.length) {
             return;
         }
+        if (linkedTraceIds.length && traceIds.length === linkedTraceIds.length && traceIds.every(function (traceId) {
+            return linkedTraceIds.indexOf(traceId) !== -1;
+        })) {
+            clearLinkedSelection();
+            return;
+        }
+        activeMaterialSummary = materialSummaryFromRow(row);
         activateLinkedTraceIds(traceIds);
+    });
+    document.getElementById('material-list-content').addEventListener('mouseover', function (event) {
+        var row = event.target.closest('.material-summary-row');
+        if (!row) {
+            return;
+        }
+        hoveredTraceIds = parseTraceIds(row.dataset.traceIds);
+        updateMaterialHoverState(row);
+    });
+    document.getElementById('material-list-content').addEventListener('mouseout', function (event) {
+        var row = event.target.closest('.material-summary-row');
+        if (!row || row.contains(event.relatedTarget)) {
+            return;
+        }
+        hoveredTraceIds = [];
+        updateMaterialHoverState(null);
+    });
+
+    materialPageScopeButton.addEventListener('click', function () {
+        materialSummaryPageOnly = !materialSummaryPageOnly;
+        clearLinkedSelection();
+        refreshMaterialList();
+        updateMaterialToolbarState();
+    });
+
+    materialFocusLinkedButton.addEventListener('click', function () {
+        if (!linkedTraceIds.length) {
+            return;
+        }
+        focusLinkedMode = !focusLinkedMode;
+        refreshLinkedTraceStyling();
+        updateMaterialToolbarState();
+    });
+
+    materialSelectedOnlyButton.addEventListener('click', function () {
+        if (!linkedTraceIds.length) {
+            return;
+        }
+        materialSelectedOnly = !materialSelectedOnly;
+        applyMaterialListFilters();
+        updateMaterialToolbarState();
+    });
+
+    materialCategoryOnlyButton.addEventListener('click', function () {
+        if (!activeMaterialSummary || !activeMaterialSummary.categoryLabel) {
+            return;
+        }
+        materialCategoryOnly = !materialCategoryOnly;
+        applyMaterialListFilters();
+        updateMaterialToolbarState();
+    });
+
+    materialClearLinkedButton.addEventListener('click', function () {
+        clearLinkedSelection();
+    });
+
+    undoDeleteTraceButton.addEventListener('click', function () {
+        undoLastDeletedTrace();
+    });
+
+    materialPrevLinkedButton.addEventListener('click', function () {
+        cycleLinkedTrace(-1);
+    });
+
+    materialNextLinkedButton.addEventListener('click', function () {
+        cycleLinkedTrace(1);
     });
 
     // ------------------------------------------------------------------ zoom
@@ -454,9 +559,11 @@ document.addEventListener('DOMContentLoaded', function () {
             showPanel('calibrate');
         } else if (tool === 'hand') {
             toolHint.textContent = 'Click and drag to pan the view.';
+            updateToolMemoryUi(null, null, null);
             showPanel('none');
         } else {
             toolHint.textContent = '';
+            updateToolMemoryUi(null, null, null);
             showPanel('none');
         }
     }
@@ -473,6 +580,7 @@ document.addEventListener('DOMContentLoaded', function () {
         populatePresetOptions(tool);
         colorInput.value = config.color;
         restoreToolMemory(tool, activeVariantFilter, activeSemanticKey);
+        updateToolMemoryUi(tool, activeVariantFilter, activeSemanticKey);
     }
 
     function populateAssemblyOptions(select, toolType, settings, variantFilter, preferDefault) {
@@ -635,6 +743,37 @@ document.addEventListener('DOMContentLoaded', function () {
         return 'plan-viewer-tool:' + (PAGE_ID || '0') + ':' + tool + '|' + variant;
     }
 
+    function toolMemoryPauseKey(tool, variantFilter, semanticKey) {
+        var key = toolMemoryKey(tool, variantFilter, semanticKey);
+        return key ? (key + ':paused') : null;
+    }
+
+    function isToolMemoryPaused(tool, variantFilter, semanticKey) {
+        var key = toolMemoryPauseKey(tool, variantFilter, semanticKey);
+        if (!key) {
+            return false;
+        }
+        try {
+            return window.sessionStorage.getItem(key) === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setToolMemoryPaused(tool, variantFilter, semanticKey, paused) {
+        var key = toolMemoryPauseKey(tool, variantFilter, semanticKey);
+        if (!key) {
+            return;
+        }
+        try {
+            if (paused) {
+                window.sessionStorage.setItem(key, '1');
+            } else {
+                window.sessionStorage.removeItem(key);
+            }
+        } catch (e) { /* storage unavailable - pause state just won't persist */ }
+    }
+
     function optionExists(select, value) {
         var wanted = value || '';
         return Array.prototype.some.call(select.options, function (option) {
@@ -680,7 +819,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function saveToolMemory(tool, variantFilter, semanticKey) {
         var key = toolMemoryKey(tool, variantFilter, semanticKey);
-        if (!key) {
+        if (!key || isToolMemoryPaused(tool, variantFilter, semanticKey)) {
             return;
         }
         var memory = {
@@ -699,7 +838,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // intentionally overrides the auto-selected default. When there is no
         // memory yet, the default from populateAssemblyOptions stands.
         var key = toolMemoryKey(tool, variantFilter, semanticKey);
-        if (!key) {
+        if (!key || isToolMemoryPaused(tool, variantFilter, semanticKey)) {
             return;
         }
         var raw;
@@ -729,12 +868,59 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function clearToolMemory(tool, variantFilter, semanticKey) {
+        var key = toolMemoryKey(tool, variantFilter, semanticKey);
+        if (!key) {
+            return;
+        }
+        try {
+            window.sessionStorage.removeItem(key);
+        } catch (e) { /* storage unavailable - nothing to clear */ }
+    }
+
+    function updateToolMemoryUi(tool, variantFilter, semanticKey) {
+        if (!toolMemoryStatus || !toolMemoryToggleButton || !toolMemoryClearButton) {
+            return;
+        }
+        var active = Boolean(tool && TOOLS[tool]);
+        toolMemoryToggleButton.disabled = !active;
+        toolMemoryClearButton.disabled = !active;
+        if (!active) {
+            toolMemoryStatus.textContent = 'Tool memory is available while a drawing tool is active.';
+            toolMemoryToggleButton.textContent = 'Pause memory';
+            return;
+        }
+        var paused = isToolMemoryPaused(tool, variantFilter, semanticKey);
+        toolMemoryStatus.textContent = paused
+            ? 'Remembered setup is paused for this tool on this page.'
+            : 'This tool remembers your last setup for this page.';
+        toolMemoryToggleButton.textContent = paused ? 'Resume memory' : 'Pause memory';
+    }
+
     // Persist as soon as the user adjusts the panel, so a picked assembly or
     // spacing sticks even if they switch tools before drawing the first trace.
     toolSettingsPanel.addEventListener('change', function () {
         if (activeTool && TOOLS[activeTool]) {
             saveToolMemory(activeTool, activeVariantFilter, activeSemanticKey);
+            updateToolMemoryUi(activeTool, activeVariantFilter, activeSemanticKey);
         }
+    });
+
+    toolMemoryToggleButton.addEventListener('click', function () {
+        if (!activeTool || !TOOLS[activeTool]) {
+            return;
+        }
+        var paused = isToolMemoryPaused(activeTool, activeVariantFilter, activeSemanticKey);
+        setToolMemoryPaused(activeTool, activeVariantFilter, activeSemanticKey, !paused);
+        updateToolMemoryUi(activeTool, activeVariantFilter, activeSemanticKey);
+    });
+
+    toolMemoryClearButton.addEventListener('click', function () {
+        if (!activeTool || !TOOLS[activeTool]) {
+            return;
+        }
+        clearToolMemory(activeTool, activeVariantFilter, activeSemanticKey);
+        updateToolMemoryUi(activeTool, activeVariantFilter, activeSemanticKey);
     });
 
     // ---------------------------------------------------------------- drawing
@@ -898,9 +1084,21 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!finishMultiPointIfPending()) {
                 if (pendingPoints.length > 0) {
                     resetPending();
+                } else if (linkedTraceIds.length) {
+                    clearLinkedSelection();
                 } else if (activeTool) {
                     activateTool(null);
                 }
+            }
+        } else if (!isTypingTarget(event.target) && event.key === '[') {
+            if (linkedTraceIds.length > 1) {
+                event.preventDefault();
+                cycleLinkedTrace(-1);
+            }
+        } else if (!isTypingTarget(event.target) && event.key === ']') {
+            if (linkedTraceIds.length > 1) {
+                event.preventDefault();
+                cycleLinkedTrace(1);
             }
         } else if (event.key === 'Enter') {
             finishMultiPointIfPending();
@@ -1062,7 +1260,10 @@ document.addEventListener('DOMContentLoaded', function () {
         updateInspectorSaveStatus('Changes save automatically.');
         inspectorSyncing = false;
         linkedTraceIds = [obj.traceId];
+        activeLinkedTraceIndex = 0;
         syncMaterialListSelection();
+        scrollMaterialRowIntoView(linkedTraceIds);
+        updateMaterialToolbarState();
         showPanel('inspector');
     }
 
@@ -1235,7 +1436,11 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         selectedTrace = null;
         linkedTraceIds = [];
+        activeMaterialSummary = null;
+        activeLinkedTraceIndex = -1;
         syncMaterialListSelection();
+        focusLinkedMode = false;
+        updateMaterialToolbarState();
         showPanel(activeTool && TOOLS[activeTool] ? 'tool-settings' : 'none');
     }
 
@@ -1396,6 +1601,63 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function traceSnapshotFromObject(obj) {
+        if (!obj || !obj.traceId) {
+            return null;
+        }
+        return {
+            traceId: obj.traceId,
+            toolType: obj.traceToolType,
+            geometry: obj.traceGeometry || [],
+            materialId: obj.traceMaterialId || null,
+            assemblyId: obj.traceAssemblyId || null,
+            parentWallId: obj.traceParentWallId || null,
+            color: obj.traceColor || '',
+            settings: JSON.parse(JSON.stringify(obj.traceSettings || {})),
+            label: (TOOLS[obj.traceToolType] && TOOLS[obj.traceToolType].label) || 'Trace',
+        };
+    }
+
+    function updateUndoDeleteUi() {
+        if (!deleteUndoBanner || !deleteUndoText) {
+            return;
+        }
+        if (!lastDeletedTraceSnapshot) {
+            deleteUndoBanner.style.display = 'none';
+            return;
+        }
+        deleteUndoText.textContent = lastDeletedTraceSnapshot.label + ' deleted. Undo restores it to this page.';
+        deleteUndoBanner.style.display = '';
+    }
+
+    function undoLastDeletedTrace() {
+        if (!lastDeletedTraceSnapshot) {
+            return;
+        }
+        var snapshot = lastDeletedTraceSnapshot;
+        fetch(TRACE_CREATE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({
+                tool_type: snapshot.toolType,
+                geometry: snapshot.geometry,
+                material_id: snapshot.materialId,
+                assembly_id: snapshot.assemblyId,
+                parent_wall_id: snapshot.parentWallId,
+                color: snapshot.color,
+                settings: snapshot.settings || {},
+            }),
+        })
+            .then(handleJsonResponse)
+            .then(function (trace) {
+                drawTrace(trace);
+                refreshMaterialList();
+                lastDeletedTraceSnapshot = null;
+                updateUndoDeleteUi();
+            })
+            .catch(showError);
+    }
+
     function activateLinkedTraceIds(traceIds) {
         var matches = getTraceObjectsByIds(traceIds);
         if (!matches.length) {
@@ -1412,9 +1674,99 @@ document.addEventListener('DOMContentLoaded', function () {
         canvas.discardActiveObject();
         selectedTrace = null;
         linkedTraceIds = traceIds.slice();
+        activeLinkedTraceIndex = 0;
         syncMaterialListSelection();
         showPanel('none');
+        scrollMaterialRowIntoView(linkedTraceIds);
         scrollCanvasObjectsIntoView(matches);
+        updateMaterialToolbarState();
+    }
+
+    function clearLinkedSelection() {
+        linkedTraceIds = [];
+        hoveredTraceIds = [];
+        activeMaterialSummary = null;
+        activeLinkedTraceIndex = -1;
+        focusLinkedMode = false;
+        materialSelectedOnly = false;
+        materialCategoryOnly = false;
+        canvas.discardActiveObject();
+        selectedTrace = null;
+        syncMaterialListSelection();
+        showPanel(activeTool && TOOLS[activeTool] ? 'tool-settings' : 'none');
+        updateMaterialToolbarState();
+    }
+
+    function findFirstMaterialRowForTraceIds(traceIds) {
+        if (!traceIds || !traceIds.length) {
+            return null;
+        }
+        var rows = document.querySelectorAll('.material-summary-row[data-trace-ids]');
+        for (var i = 0; i < rows.length; i++) {
+            var rowTraceIds = parseTraceIds(rows[i].dataset.traceIds);
+            if (rowTraceIds.some(function (traceId) { return traceIds.indexOf(traceId) !== -1; })) {
+                return rows[i];
+            }
+        }
+        return null;
+    }
+
+    function scrollMaterialRowIntoView(traceIds) {
+        var row = findFirstMaterialRowForTraceIds(traceIds);
+        if (!row || row.style.display === 'none') {
+            return;
+        }
+        row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function cycleLinkedTrace(direction) {
+        if (linkedTraceIds.length < 2) {
+            return;
+        }
+        if (activeLinkedTraceIndex < 0) {
+            activeLinkedTraceIndex = 0;
+        } else {
+            activeLinkedTraceIndex = (activeLinkedTraceIndex + direction + linkedTraceIds.length) % linkedTraceIds.length;
+        }
+        focusSpecificLinkedTrace();
+    }
+
+    function focusSpecificLinkedTrace() {
+        if (activeLinkedTraceIndex < 0 || activeLinkedTraceIndex >= linkedTraceIds.length) {
+            return;
+        }
+        var targetId = linkedTraceIds[activeLinkedTraceIndex];
+        var match = getTraceObjectsByIds([targetId])[0];
+        if (!match) {
+            return;
+        }
+        canvas.discardActiveObject();
+        canvas.setActiveObject(match);
+        canvas.requestRenderAll();
+        scrollCanvasObjectsIntoView([match]);
+        onTraceSelected();
+        updateMaterialToolbarState();
+    }
+
+    function materialSummaryFromRow(row) {
+        if (!row) {
+            return null;
+        }
+        return {
+            label: row.dataset.materialLabel || 'Material row',
+            categoryLabel: row.dataset.categoryLabel || '',
+            quantity: row.dataset.quantity || '',
+            visibleTraceCount: parseInt(row.dataset.visibleTraceCount || '0', 10) || 0,
+            totalTraceCount: parseInt(row.dataset.totalTraceCount || '0', 10) || 0,
+        };
+    }
+
+    function updateMaterialHoverState(activeRow) {
+        document.querySelectorAll('.material-summary-row').forEach(function (row) {
+            row.classList.toggle('is-hovered', Boolean(activeRow && row === activeRow));
+        });
+        refreshLinkedTraceStyling();
+        updateMaterialToolbarState();
     }
 
     function syncMaterialListSelection() {
@@ -1426,7 +1778,109 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             row.classList.toggle('is-linked', Boolean(isLinked));
         });
+        if (!linkedTraceIds.length) {
+            activeMaterialSummary = null;
+            materialSelectedOnly = false;
+            materialCategoryOnly = false;
+        }
+        applyMaterialListFilters();
         refreshLinkedTraceStyling();
+        updateMaterialToolbarState();
+    }
+
+    function applyMaterialListFilters() {
+        var rows = document.querySelectorAll('.material-summary-row');
+        rows.forEach(function (row) {
+            var visible = true;
+            if (materialSelectedOnly && linkedTraceIds.length) {
+                var traceIds = parseTraceIds(row.dataset.traceIds);
+                visible = traceIds.some(function (traceId) {
+                    return linkedTraceIds.indexOf(traceId) !== -1;
+                });
+            }
+            if (visible && materialCategoryOnly && activeMaterialSummary && activeMaterialSummary.categoryLabel) {
+                visible = row.dataset.categoryLabel === activeMaterialSummary.categoryLabel;
+            }
+            row.style.display = visible ? '' : 'none';
+        });
+        document.querySelectorAll('.material-summary-group').forEach(function (group) {
+            var hasVisibleRow = Array.prototype.some.call(group.querySelectorAll('.material-summary-row'), function (row) {
+                return row.style.display !== 'none';
+            });
+            group.style.display = hasVisibleRow ? '' : 'none';
+        });
+    }
+
+    function updateMaterialToolbarState() {
+        var hasLinked = linkedTraceIds.length > 0;
+        var hasHover = hoveredTraceIds.length > 0;
+        if (materialPageScopeButton) {
+            materialPageScopeButton.textContent = 'This page only: ' + (materialSummaryPageOnly ? 'On' : 'Off');
+            materialPageScopeButton.classList.toggle('btn-primary', materialSummaryPageOnly);
+            materialPageScopeButton.classList.toggle('btn-outline-secondary', !materialSummaryPageOnly);
+        }
+        if (materialFocusLinkedButton) {
+            materialFocusLinkedButton.disabled = !hasLinked;
+            materialFocusLinkedButton.textContent = 'Focus linked: ' + (focusLinkedMode ? 'On' : 'Off');
+            materialFocusLinkedButton.classList.toggle('btn-primary', hasLinked && focusLinkedMode);
+            materialFocusLinkedButton.classList.toggle('btn-outline-secondary', !focusLinkedMode);
+        }
+        if (materialSelectedOnlyButton) {
+            materialSelectedOnlyButton.disabled = !hasLinked;
+            materialSelectedOnlyButton.textContent = 'Selected only: ' + (materialSelectedOnly ? 'On' : 'Off');
+            materialSelectedOnlyButton.classList.toggle('btn-primary', hasLinked && materialSelectedOnly);
+            materialSelectedOnlyButton.classList.toggle('btn-outline-secondary', !materialSelectedOnly);
+        }
+        if (materialCategoryOnlyButton) {
+            materialCategoryOnlyButton.disabled = !(activeMaterialSummary && activeMaterialSummary.categoryLabel);
+            materialCategoryOnlyButton.textContent = 'Current category: ' + (materialCategoryOnly ? 'On' : 'Off');
+            materialCategoryOnlyButton.classList.toggle('btn-primary', Boolean(activeMaterialSummary && activeMaterialSummary.categoryLabel && materialCategoryOnly));
+            materialCategoryOnlyButton.classList.toggle('btn-outline-secondary', !materialCategoryOnly);
+        }
+        if (materialPrevLinkedButton) {
+            materialPrevLinkedButton.disabled = linkedTraceIds.length < 2;
+        }
+        if (materialNextLinkedButton) {
+            materialNextLinkedButton.disabled = linkedTraceIds.length < 2;
+        }
+        if (materialClearLinkedButton) {
+            materialClearLinkedButton.disabled = !hasLinked;
+        }
+        if (materialListStatus) {
+            if (hasHover && !hasLinked) {
+                materialListStatus.textContent = hoveredTraceIds.length + ' trace' + (hoveredTraceIds.length === 1 ? '' : 's') + ' in hover preview.';
+            } else if (!hasLinked) {
+                materialListStatus.textContent = materialSummaryPageOnly
+                    ? 'Showing only materials generated from traces on this page.'
+                    : 'Showing all estimate rows. Select a material row to highlight matching traces on this page.';
+            } else if (materialSelectedOnly || materialCategoryOnly) {
+                materialListStatus.textContent = 'Filtered to ' +
+                    (materialSelectedOnly ? 'selected rows' : 'all rows') +
+                    (materialSelectedOnly && materialCategoryOnly ? ' and ' : '') +
+                    (materialCategoryOnly ? 'the current category' : '') + '.';
+            } else if (focusLinkedMode) {
+                materialListStatus.textContent = linkedTraceIds.length + ' linked trace' + (linkedTraceIds.length === 1 ? '' : 's') + ' focused on the plan.';
+            } else {
+                materialListStatus.textContent = linkedTraceIds.length + ' linked trace' + (linkedTraceIds.length === 1 ? '' : 's') + ' highlighted on this page.';
+            }
+        }
+        if (selectionSummary) {
+            if (hasLinked && activeMaterialSummary) {
+                selectionSummary.innerHTML = '<strong>' + escapeHtml(activeMaterialSummary.label) + '</strong> • ' +
+                    linkedTraceIds.length + ' linked trace' + (linkedTraceIds.length === 1 ? '' : 's') +
+                    (linkedTraceIds.length > 1 ? ' • match ' + escapeHtml(String(activeLinkedTraceIndex + 1)) + ' of ' + escapeHtml(String(linkedTraceIds.length)) : '') +
+                    (activeMaterialSummary.quantity ? ' • qty ' + escapeHtml(String(activeMaterialSummary.quantity)) : '') +
+                    (focusLinkedMode ? ' • focus mode on' : '');
+            } else if (selectedTrace) {
+                selectionSummary.innerHTML = '<strong>' + escapeHtml((TOOLS[selectedTrace.traceToolType] || TOOLS.line).label) + '</strong>' +
+                    (selectedTrace.traceMeasurement ? ' • ' + escapeHtml(selectedTrace.traceMeasurement) : '') +
+                    (selectedTrace.traceAssemblyId ? ' • assembly assigned' : ' • no assembly assigned');
+            } else if (hasHover) {
+                selectionSummary.textContent = hoveredTraceIds.length + ' source trace' + (hoveredTraceIds.length === 1 ? '' : 's') + ' previewed on hover.';
+            } else {
+                selectionSummary.textContent = 'Hover a material row to preview its source traces. Click a row to keep those traces selected.';
+            }
+        }
     }
 
     function refreshLinkedTraceStyling() {
@@ -2115,6 +2569,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!obj || !obj.traceId) {
             return;
         }
+        lastDeletedTraceSnapshot = traceSnapshotFromObject(obj);
         fetch(TRACE_DELETE_URL_BASE.replace('0', obj.traceId), {
             method: 'POST',
             headers: { 'X-CSRFToken': csrftoken },
@@ -2126,6 +2581,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 selectedTrace = null;
                 showPanel(activeTool && TOOLS[activeTool] ? 'tool-settings' : 'none');
                 refreshMaterialList();
+                updateUndoDeleteUi();
+            } else {
+                lastDeletedTraceSnapshot = null;
+                updateUndoDeleteUi();
             }
         });
     }
@@ -2137,6 +2596,7 @@ document.addEventListener('DOMContentLoaded', function () {
         obj.traceMaterialId = trace.material_id;
         obj.traceAssemblyId = trace.assembly_id;
         obj.traceParentWallId = trace.parent_wall_id;
+        obj.traceGeometry = trace.geometry || [];
         obj.traceColor = trace.color || '';
         obj.traceSettings = trace.settings || {};
         obj.traceMeasurement = trace.measurement_display || '';
@@ -2185,19 +2645,33 @@ document.addEventListener('DOMContentLoaded', function () {
         var config = TOOLS[obj.traceToolType] || TOOLS.line;
         var color = obj.traceColor || (obj.traceAssemblyId ? config.activeColor : config.color);
         var isLinked = linkedTraceIds.indexOf(obj.traceId) !== -1;
+        var isHovered = hoveredTraceIds.indexOf(obj.traceId) !== -1;
         var lineWidth = isLinked ? 7 : 4;
-        var fillAlpha = isLinked ? 0.28 : 0.18;
+        var fillAlpha = isLinked ? 0.28 : (isHovered ? 0.24 : 0.18);
+        var opacity = focusLinkedMode && linkedTraceIds.length ? (isLinked ? 1 : 0.12) : (isHovered ? 0.95 : 1);
+        if (!isLinked && isHovered) {
+            lineWidth = 6;
+        }
         if (obj.traceToolType === 'area' || obj.traceToolType === 'polyline') {
-            obj.set({ stroke: color, strokeWidth: lineWidth, fill: hexToRgba(color, fillAlpha) });
+            obj.set({ stroke: color, strokeWidth: lineWidth, fill: hexToRgba(color, fillAlpha), opacity: opacity });
             if (obj.traceToolType === 'polyline' && !(obj.traceSettings || {}).closed) {
                 obj.set({ fill: '' });
             }
         } else if (obj.traceToolType === 'count') {
+            obj.set({ opacity: opacity });
             obj.getObjects().forEach(function (circle) {
-                circle.set({ stroke: color, strokeWidth: isLinked ? 4 : 2, fill: hexToRgba(color, isLinked ? 0.8 : 0.6) });
+                circle.set({
+                    stroke: color,
+                    strokeWidth: isLinked ? 4 : (isHovered ? 3 : 2),
+                    fill: hexToRgba(color, isLinked ? 0.8 : (isHovered ? 0.72 : 0.6)),
+                });
             });
         } else {
-            obj.set({ stroke: color, strokeWidth: obj.traceToolType === 'opening' ? (isLinked ? 8 : 6) : lineWidth });
+            obj.set({
+                stroke: color,
+                strokeWidth: obj.traceToolType === 'opening' ? (isLinked ? 8 : (isHovered ? 7 : 6)) : lineWidth,
+                opacity: opacity,
+            });
         }
     }
 

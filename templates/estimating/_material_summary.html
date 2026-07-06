@@ -10,6 +10,13 @@
         box-shadow: inset 3px 0 0 var(--bs-primary);
         background: rgba(58, 124, 165, 0.12);
     }
+    .material-summary-row.is-hovered {
+        box-shadow: inset 3px 0 0 #fd7e14;
+        background: rgba(253, 126, 20, 0.1);
+    }
+    .material-summary-row.is-off-page {
+        opacity: 0.6;
+    }
     .material-summary-row.is-unlinked {
         cursor: default;
     }
@@ -33,17 +40,36 @@
 {% regroup order_list by category_label as category_groups %}
 {% if category_groups %}
 {% for group in category_groups %}
-<div class="mb-3">
+<div class="mb-3 material-summary-group" data-category-label="{{ group.grouper }}">
     <p class="small fw-bold mb-1">{{ group.grouper }}</p>
     <table class="table table-sm mb-0">
         <tbody>
             {% for row in group.list %}
-            <tr class="material-summary-row {% if not row.trace_ids %}is-unlinked{% endif %}"
+            <tr class="material-summary-row {% if not row.trace_ids %}is-unlinked{% endif %} {% if row.total_trace_count and not row.visible_trace_count %}is-off-page{% endif %}"
+                data-material-label="{{ row.material__name }}{% if row.role_label %} - {{ row.role_label }}{% endif %}{% if row.length_ft %} - {{ row.length_ft|floatformat:0 }} ft{% endif %}"
+                data-category-label="{{ group.grouper }}"
+                data-quantity="{{ row.total_quantity }}"
+                data-visible-trace-count="{{ row.visible_trace_count|default:0 }}"
+                data-total-trace-count="{{ row.total_trace_count|default:0 }}"
                 {% if row.trace_ids %}data-trace-ids="{{ row.trace_ids|join:',' }}"{% endif %}>
                 <td>
                     {{ row.material__name }}
+                    {% if row.role_label %}<span class="text-muted">&middot; {{ row.role_label }}</span>{% endif %}
                     {% if row.length_ft %}<span class="text-muted">&middot; {{ row.length_ft|floatformat:0 }} ft</span>{% endif %}
-                    {% if row.trace_ids %}<div class="small text-muted">Links to {{ row.trace_ids|length }} traced element{{ row.trace_ids|length|pluralize }}</div>{% endif %}
+                    {% if row.visible_trace_count %}
+                    <span class="badge rounded-pill text-bg-light border ms-1">{{ row.visible_trace_count }} trace{{ row.visible_trace_count|pluralize }}</span>
+                    {% endif %}
+                    {% if row.total_trace_count %}
+                    <div class="small text-muted">
+                        {% if row.visible_trace_count and row.visible_trace_count != row.total_trace_count %}
+                        Links to {{ row.visible_trace_count }} on this page of {{ row.total_trace_count }} traced element{{ row.total_trace_count|pluralize }}
+                        {% elif row.visible_trace_count %}
+                        Links to {{ row.visible_trace_count }} traced element{{ row.visible_trace_count|pluralize }}
+                        {% else %}
+                        Links live on other page{{ row.page_count|pluralize }}
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </td>
                 <td class="text-end">{{ row.total_quantity }}</td>
             </tr>

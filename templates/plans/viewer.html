@@ -34,6 +34,34 @@
         border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius); padding: 1rem;
         max-height: 80vh; overflow-y: auto;
     }
+    .material-list-toolbar {
+        display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;
+    }
+    .material-list-toolbar .btn {
+        --bs-btn-padding-y: 0.2rem;
+        --bs-btn-padding-x: 0.55rem;
+        --bs-btn-font-size: 0.8rem;
+    }
+    #material-list-status {
+        min-height: 2.25rem;
+    }
+    #selection-summary {
+        margin-top: 0.75rem;
+        padding: 0.65rem 0.8rem;
+        border: 1px solid var(--brand-gray-border);
+        border-radius: var(--bs-border-radius);
+        background: linear-gradient(180deg, rgba(58,124,165,0.08), rgba(58,124,165,0.03));
+    }
+    #selection-summary strong {
+        color: var(--bs-primary);
+    }
+    #delete-undo-banner {
+        margin-top: 0.75rem;
+        padding: 0.65rem 0.8rem;
+        border: 1px solid rgba(253, 126, 20, 0.35);
+        border-radius: var(--bs-border-radius);
+        background: rgba(253, 126, 20, 0.08);
+    }
     #wall-elevation-modal {
         position: fixed; inset: 5vh 5vw; z-index: 1050; background: var(--bs-white); border: 1px solid var(--brand-gray-border);
         border-radius: var(--bs-border-radius); box-shadow: 0 1rem 3rem rgba(44,54,64,.35); padding: 1rem; display: none; overflow: auto;
@@ -308,6 +336,13 @@
                     <option value="vertical">Vertically (up-down)</option>
                 </select>
             </div>
+            <div class="border rounded p-2 mb-3">
+                <div class="small text-muted mb-2" id="tool-memory-status">This tool remembers your last setup for this page.</div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="tool-memory-toggle">Pause memory</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="tool-memory-clear">Forget saved setup</button>
+                </div>
+            </div>
 
             <h2 class="h5 mt-3">Presets</h2>
             <div class="mb-2">
@@ -358,6 +393,25 @@
             Live totals for this project's estimate (all pages).
             <a href="{% url 'estimating:estimate-detail' estimate.pk %}">Full view &rarr;</a>
         </p>
+        <div class="material-list-toolbar">
+            <button type="button" class="btn btn-outline-secondary" id="material-page-scope">This page only: Off</button>
+            <button type="button" class="btn btn-outline-secondary" id="material-focus-linked" disabled>Focus linked: Off</button>
+            <button type="button" class="btn btn-outline-secondary" id="material-selected-only" disabled>Selected only: Off</button>
+            <button type="button" class="btn btn-outline-secondary" id="material-category-only" disabled>Current category: Off</button>
+            <button type="button" class="btn btn-outline-secondary" id="material-prev-linked" disabled>Prev match</button>
+            <button type="button" class="btn btn-outline-secondary" id="material-next-linked" disabled>Next match</button>
+            <button type="button" class="btn btn-outline-secondary" id="material-clear-linked" disabled>Clear linked</button>
+        </div>
+        <p class="small text-muted mb-2" id="material-list-status">Showing all estimate rows. Select a material row to highlight matching traces on this page.</p>
+        <div id="selection-summary" class="small text-muted">
+            Hover a material row to preview its source traces. Click a row to keep those traces selected.
+        </div>
+        <div id="delete-undo-banner" class="small" style="display: none;">
+            <div class="d-flex align-items-center justify-content-between gap-2">
+                <span id="delete-undo-text">Trace deleted.</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="undo-delete-trace">Undo last delete</button>
+            </div>
+        </div>
         <div id="material-list-content"></div>
     </div>
 </div>

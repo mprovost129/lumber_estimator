@@ -59,7 +59,7 @@ def _item_rank(account, category, role):
     return normalized.index(key) if key in normalized else len(normalized)
 
 
-def _grouped_order_list(estimate):
+def _grouped_order_list(estimate, page_id=None, page_only=False):
     """The supplier-ready view: line items grouped by product + piece length
     *and* construction system (so the same SKU used under two different
     systems, e.g. 2x6 SPF #2 in both walls and blocking, never merges into
@@ -67,8 +67,7 @@ def _grouped_order_list(estimate):
     account = estimate.project.account
     category_rank = {c: i for i, c in enumerate(_category_order_for(account))}
     rows = list(
-        estimate.line_items
-        .annotate(effective_category=_effective_category())
+        _summary_line_items(estimate, page_id=page_id, page_only=page_only)
         .order_by()
         .values('effective_category', 'material__name', 'material__nominal_dimension',
                 'material__species', 'material__grade', 'length_ft')
@@ -84,21 +83,30 @@ def _grouped_order_list(estimate):
     ))
     for row in rows:
         row['category_label'] = CATEGORY_LABELS.get(row['effective_category'], row['effective_category'])
+        row['role_label'] = row.get('min_role') or ''
     return rows
 
 
-def _attach_trace_ids(order_list, estimate):
-    """Add the contributing trace ids for each grouped summary row so the
-    plan viewer can link a material line back to the drawn elements that
-    generated it."""
-    trace_map = {}
+def _summary_line_items(estimate, page_id=None, page_only=False):
+    line_items = estimate.line_items.annotate(effective_category=_effective_category())
+    if page_only and page_id:
+        line_items = line_items.filter(trace__plan_page_id=page_id)
+    return line_items
+
+
+def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=False):
+    """Add current-page and all-page trace context for each grouped summary
+    row so the viewer can link material lines back to visible plan elements
+    without losing awareness that a grouped row may span other pages."""
+    total_trace_map = {}
+    visible_trace_map = {}
+    page_map = {}
     line_items = (
-        estimate.line_items
-        .annotate(effective_category=_effective_category())
+        _summary_line_items(estimate, page_id=current_page_id, page_only=page_only)
         .exclude(trace_id__isnull=True)
         .values(
             'effective_category', 'material__name', 'material__nominal_dimension',
-            'material__species', 'material__grade', 'length_ft', 'trace_id',
+            'material__species', 'material__grade', 'length_ft', 'trace_id', 'trace__plan_page_id',
         )
     )
     for item in line_items:
@@ -110,7 +118,10 @@ def _attach_trace_ids(order_list, estimate):
             item['material__grade'],
             item['length_ft'],
         )
-        trace_map.setdefault(key, set()).add(item['trace_id'])
+        total_trace_map.setdefault(key, set()).add(item['trace_id'])
+        page_map.setdefault(key, set()).add(item['trace__plan_page_id'])
+        if current_page_id and item['trace__plan_page_id'] == current_page_id:
+            visible_trace_map.setdefault(key, set()).add(item['trace_id'])
     for row in order_list:
         key = (
             row['effective_category'],
@@ -120,7 +131,12 @@ def _attach_trace_ids(order_list, estimate):
             row['material__grade'],
             row['length_ft'],
         )
-        row['trace_ids'] = sorted(trace_map.get(key, set()))
+        total_trace_ids = sorted(total_trace_map.get(key, set()))
+        visible_trace_ids = sorted(visible_trace_map.get(key, set())) if current_page_id else total_trace_ids
+        row['trace_ids'] = visible_trace_ids
+        row['visible_trace_count'] = len(visible_trace_ids)
+        row['total_trace_count'] = len(total_trace_ids)
+        row['page_count'] = len(page_map.get(key, set()))
     return order_list
 
 
@@ -203,8 +219,22 @@ class EstimateMaterialSummaryView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['order_list'] = _attach_trace_ids(_grouped_order_list(self.object), self.object)
+        current_page_id = self.request.GET.get('current_page_id')
+        page_only = self.request.GET.get('page_only') == '1'
+        try:
+            current_page_id = int(current_page_id) if current_page_id else None
+        except (TypeError, ValueError):
+            current_page_id = None
+        order_list = _grouped_order_list(self.object, page_id=current_page_id, page_only=page_only)
+        context['order_list'] = _attach_trace_context(
+            order_list,
+            self.object,
+            current_page_id=current_page_id,
+            page_only=page_only,
+        )
         context['totals'] = _summary_totals(context['order_list'])
+        context['page_only'] = page_only
+        context['current_page_id'] = current_page_id
         return context
 
 
