@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var toolPanelTitle = document.getElementById('tool-panel-title');
     var lastMeasurement = document.getElementById('last-measurement');
     var dismissOnboardingTipButton = document.getElementById('dismiss-onboarding-tip');
+    var headerCalibrateButton = document.getElementById('header-calibrate-tool');
     var scalePresetSelect = document.getElementById('scale-preset-select');
     var applyScalePresetButton = document.getElementById('apply-scale-preset');
 
@@ -504,7 +505,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // whenever a raw tool button is used instead.
     var activeSemanticKey = null;
 
-    document.querySelectorAll('.tool-btn[data-tool]').forEach(function (button) {
+    document.querySelectorAll('#tool-sidebar .tool-btn[data-tool]').forEach(function (button) {
         button.addEventListener('click', function () {
             var tool = button.dataset.tool;
             var wasActive = activeTool === tool && button.classList.contains('active');
@@ -512,6 +513,14 @@ document.addEventListener('DOMContentLoaded', function () {
             activateTool(wasActive ? null : tool, null, null, wasActive ? null : button);
         });
     });
+
+    if (headerCalibrateButton) {
+        headerCalibrateButton.addEventListener('click', function () {
+            var wasActive = activeTool === 'calibrate' && headerCalibrateButton.classList.contains('active');
+            activeSemanticKey = null;
+            activateTool(wasActive ? null : 'calibrate', null, null, wasActive ? null : headerCalibrateButton);
+        });
+    }
 
     document.querySelectorAll('#tool-sidebar [data-semantic]').forEach(function (button) {
         button.addEventListener('click', function () {
@@ -575,7 +584,7 @@ document.addEventListener('DOMContentLoaded', function () {
             variantFilter = null;
             variantLabel = null;
             settingsFieldsOverride = null;
-            sourceButton = document.querySelector('.tool-btn[data-tool="calibrate"]');
+            sourceButton = headerCalibrateButton || document.querySelector('#tool-sidebar .tool-btn[data-tool="calibrate"]');
         }
         // Any activation (guarded redirect, direct tool pick, or deactivate)
         // replaces the pending re-arm, so switching tools or hitting Escape
