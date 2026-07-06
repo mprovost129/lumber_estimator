@@ -159,7 +159,7 @@ class TraceAssemblyWiringTests(TestCase):
         summary_url = reverse('estimating:estimate-material-summary', args=[self.estimate.pk])
         self.assertContains(self.client.get(summary_url), 'No materials yet')
 
-        self.client.post(
+        create_response = self.client.post(
             reverse('plans:trace-create', args=[self.page.pk]),
             data=json.dumps({
                 'tool_type': 'line', 'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}],
@@ -167,9 +167,11 @@ class TraceAssemblyWiringTests(TestCase):
             }),
             content_type='application/json',
         )
+        trace_id = create_response.json()['id']
         response = self.client.get(summary_url)
         self.assertContains(response, 'Wire 2x6')
         self.assertContains(response, '9')
+        self.assertContains(response, f'data-trace-ids="{trace_id}"')
 
     def test_create_trace_with_assembly_requires_calibration(self):
         self.page.scale_pixels_per_foot = None

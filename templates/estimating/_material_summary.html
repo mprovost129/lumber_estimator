@@ -1,3 +1,19 @@
+<style>
+    .material-summary-row {
+        cursor: pointer;
+        transition: background-color 0.14s ease, box-shadow 0.14s ease;
+    }
+    .material-summary-row:hover {
+        background: rgba(58, 124, 165, 0.08);
+    }
+    .material-summary-row.is-linked {
+        box-shadow: inset 3px 0 0 var(--bs-primary);
+        background: rgba(58, 124, 165, 0.12);
+    }
+    .material-summary-row.is-unlinked {
+        cursor: default;
+    }
+</style>
 {% if totals.total_pieces %}
 <div class="mat-summary-stats">
     <div class="mat-stat">
@@ -22,10 +38,12 @@
     <table class="table table-sm mb-0">
         <tbody>
             {% for row in group.list %}
-            <tr>
+            <tr class="material-summary-row {% if not row.trace_ids %}is-unlinked{% endif %}"
+                {% if row.trace_ids %}data-trace-ids="{{ row.trace_ids|join:',' }}"{% endif %}>
                 <td>
                     {{ row.material__name }}
                     {% if row.length_ft %}<span class="text-muted">&middot; {{ row.length_ft|floatformat:0 }} ft</span>{% endif %}
+                    {% if row.trace_ids %}<div class="small text-muted">Links to {{ row.trace_ids|length }} traced element{{ row.trace_ids|length|pluralize }}</div>{% endif %}
                 </td>
                 <td class="text-end">{{ row.total_quantity }}</td>
             </tr>

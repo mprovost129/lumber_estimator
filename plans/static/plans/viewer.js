@@ -120,6 +120,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var pendingPoints = [];        // clicks accumulated for the in-progress shape
     var previewObject = null;      // rubber-band preview while drawing
     var selectedTrace = null;
+    var linkedTraceIds = [];
     var isPanning = false;         // hand tool: click-drag in progress
     var panStart = null;
     var inspectorSyncing = false;
@@ -149,10 +150,23 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (response) { return response.text(); })
             .then(function (html) {
                 document.getElementById('material-list-content').innerHTML = html;
+                syncMaterialListSelection();
             })
             .catch(function () { /* not on the critical path - the panel just stays stale */ });
     }
     refreshMaterialList();
+
+    document.getElementById('material-list-content').addEventListener('click', function (event) {
+        var row = event.target.closest('.material-summary-row');
+        if (!row) {
+            return;
+        }
+        var traceIds = parseTraceIds(row.dataset.traceIds);
+        if (!traceIds.length) {
+            return;
+        }
+        activateLinkedTraceIds(traceIds);
+    });
 
     // ------------------------------------------------------------------ zoom
     // Trace geometry is stored in the plan image's natural pixel space.
@@ -1047,6 +1061,8 @@ document.addEventListener('DOMContentLoaded', function () {
         renderInspectorSettings(obj.traceToolType, obj.traceSettings || {});
         updateInspectorSaveStatus('Changes save automatically.');
         inspectorSyncing = false;
+        linkedTraceIds = [obj.traceId];
+        syncMaterialListSelection();
         showPanel('inspector');
     }
 
@@ -1218,6 +1234,8 @@ document.addEventListener('DOMContentLoaded', function () {
             tracePersistTimer = null;
         }
         selectedTrace = null;
+        linkedTraceIds = [];
+        syncMaterialListSelection();
         showPanel(activeTool && TOOLS[activeTool] ? 'tool-settings' : 'none');
     }
 
@@ -1359,6 +1377,88 @@ document.addEventListener('DOMContentLoaded', function () {
         canvas.setActiveObject(match);
         canvas.requestRenderAll();
         onTraceSelected();
+    }
+
+    function parseTraceIds(rawValue) {
+        if (!rawValue) {
+            return [];
+        }
+        return rawValue.split(',').map(function (value) {
+            return parseInt(value, 10);
+        }).filter(function (value) {
+            return !isNaN(value);
+        });
+    }
+
+    function getTraceObjectsByIds(traceIds) {
+        return canvas.getObjects().filter(function (obj) {
+            return obj.traceId && traceIds.indexOf(obj.traceId) !== -1;
+        });
+    }
+
+    function activateLinkedTraceIds(traceIds) {
+        var matches = getTraceObjectsByIds(traceIds);
+        if (!matches.length) {
+            return;
+        }
+        if (matches.length === 1) {
+            canvas.discardActiveObject();
+            canvas.setActiveObject(matches[0]);
+            canvas.requestRenderAll();
+            scrollCanvasObjectsIntoView(matches);
+            onTraceSelected();
+            return;
+        }
+        selectedTrace = null;
+        showPanel('none');
+        var selection = new fabric.ActiveSelection(matches, { canvas: canvas });
+        canvas.discardActiveObject();
+        canvas.setActiveObject(selection);
+        linkedTraceIds = traceIds.slice();
+        syncMaterialListSelection();
+        canvas.requestRenderAll();
+        scrollCanvasObjectsIntoView(matches);
+    }
+
+    function syncMaterialListSelection() {
+        var rows = document.querySelectorAll('.material-summary-row[data-trace-ids]');
+        rows.forEach(function (row) {
+            var traceIds = parseTraceIds(row.dataset.traceIds);
+            var isLinked = linkedTraceIds.length && traceIds.some(function (traceId) {
+                return linkedTraceIds.indexOf(traceId) !== -1;
+            });
+            row.classList.toggle('is-linked', Boolean(isLinked));
+        });
+    }
+
+    function scrollCanvasObjectsIntoView(objects) {
+        if (!objects.length) {
+            return;
+        }
+        var bounds = objects.reduce(function (acc, obj) {
+            var rect = obj.getBoundingRect();
+            if (!acc) {
+                return {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.left + rect.width,
+                    bottom: rect.top + rect.height,
+                };
+            }
+            acc.left = Math.min(acc.left, rect.left);
+            acc.top = Math.min(acc.top, rect.top);
+            acc.right = Math.max(acc.right, rect.left + rect.width);
+            acc.bottom = Math.max(acc.bottom, rect.top + rect.height);
+            return acc;
+        }, null);
+        if (!bounds) {
+            return;
+        }
+        var centerX = (bounds.left + bounds.right) / 2 * currentZoom;
+        var centerY = (bounds.top + bounds.bottom) / 2 * currentZoom;
+        var wrapRect = canvasWrapEl.getBoundingClientRect();
+        canvasWrapEl.scrollLeft = Math.max(centerX - (wrapRect.width / 2), 0);
+        canvasWrapEl.scrollTop = Math.max(centerY - (wrapRect.height / 2), 0);
     }
 
     // -------------------------------------------------------- wall elevation

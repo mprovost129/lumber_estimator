@@ -87,6 +87,43 @@ def _grouped_order_list(estimate):
     return rows
 
 
+def _attach_trace_ids(order_list, estimate):
+    """Add the contributing trace ids for each grouped summary row so the
+    plan viewer can link a material line back to the drawn elements that
+    generated it."""
+    trace_map = {}
+    line_items = (
+        estimate.line_items
+        .annotate(effective_category=_effective_category())
+        .exclude(trace_id__isnull=True)
+        .values(
+            'effective_category', 'material__name', 'material__nominal_dimension',
+            'material__species', 'material__grade', 'length_ft', 'trace_id',
+        )
+    )
+    for item in line_items:
+        key = (
+            item['effective_category'],
+            item['material__name'],
+            item['material__nominal_dimension'],
+            item['material__species'],
+            item['material__grade'],
+            item['length_ft'],
+        )
+        trace_map.setdefault(key, set()).add(item['trace_id'])
+    for row in order_list:
+        key = (
+            row['effective_category'],
+            row['material__name'],
+            row['material__nominal_dimension'],
+            row['material__species'],
+            row['material__grade'],
+            row['length_ft'],
+        )
+        row['trace_ids'] = sorted(trace_map.get(key, set()))
+    return order_list
+
+
 # Plain "NxM" (2x6, 2 x 10, 1.75x11.875): dimensional lumber and engineered
 # beam stock. Three-part sheet dims (7/16x4x8), rolls, and per-square siding
 # do not match, so they are excluded from board feet rather than guessed at.
@@ -166,7 +203,7 @@ class EstimateMaterialSummaryView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['order_list'] = _grouped_order_list(self.object)
+        context['order_list'] = _attach_trace_ids(_grouped_order_list(self.object), self.object)
         context['totals'] = _summary_totals(context['order_list'])
         return context
 
