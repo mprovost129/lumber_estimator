@@ -91,6 +91,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var toolMemoryToggleButton = document.getElementById('tool-memory-toggle');
     var toolMemoryClearButton = document.getElementById('tool-memory-clear');
     var deleteButton = document.getElementById('delete-selected');
+    var sketchModeToggle = document.getElementById('sketch-mode-toggle');
     var materialControlsTrigger = document.getElementById('material-controls-trigger');
     var materialPageScopeButton = document.getElementById('material-page-scope');
     var materialFocusLinkedButton = document.getElementById('material-focus-linked');
@@ -174,6 +175,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var csrftoken = getCookie('csrftoken');
     var canvas = new fabric.Canvas('plan-canvas', { selection: true });
     var activeTool = null;
+    var sketchModeActive = false;  // fast-layout mode: forced ortho-snap + cumulative length readout
     var pendingPoints = [];        // clicks accumulated for the in-progress shape
     var previewObject = null;      // rubber-band preview while drawing
     var selectedTrace = null;
@@ -689,6 +691,19 @@ document.addEventListener('DOMContentLoaded', function () {
             settingsFieldsOverride = null;
             sourceButton = headerCalibrateButton || document.querySelector(TOOLBAR_SELECTOR + ' .tool-btn[data-tool="calibrate"]');
         }
+        // Sketch Mode only ever arms the wall polyline tool - picking a
+        // genuinely different tool (or a calibration redirect resolving away
+        // from it) is the user's way of leaving it. `tool` becomes null on
+        // its own after every finished trace (auto-select-on-create runs
+        // activateTool(null) to open the inspector) - that's not the user
+        // leaving Sketch Mode, so a null/falsy tool must NOT clear it, or
+        // finishing even one wall run would silently cancel the session.
+        if (sketchModeActive && tool && tool !== 'polyline' && tool !== 'calibrate') {
+            sketchModeActive = false;
+            if (sketchModeToggle) {
+                sketchModeToggle.classList.remove('active');
+            }
+        }
         // Any activation (guarded redirect, direct tool pick, or deactivate)
         // replaces the pending re-arm, so switching tools or hitting Escape
         // never resurrects a stale request later.
@@ -1198,7 +1213,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (SNAPPING_TOOLS.indexOf(activeTool) === -1) {
             return pointer;
         }
-        if (domEvent && domEvent.shiftKey) {
+        if (domEvent && domEvent.shiftKey && !sketchModeActive) {
             return pointer;
         }
         var endpoint = snapToEndpoint(pointer);
@@ -1221,6 +1236,51 @@ document.addEventListener('DOMContentLoaded', function () {
     measureReadout.hidden = true;
     canvasWrapEl.appendChild(measureReadout);
 
+    function cumulativePendingLengthPx(pointer) {
+        var total = 0;
+        for (var i = 1; i < pendingPoints.length; i++) {
+            total += Math.hypot(pendingPoints[i].x - pendingPoints[i - 1].x, pendingPoints[i].y - pendingPoints[i - 1].y);
+        }
+        var last = pendingPoints[pendingPoints.length - 1];
+        total += Math.hypot(pointer.x - last.x, pointer.y - last.y);
+        return total;
+    }
+
+    // Sketch Mode: a fast-layout entry point built entirely from drawing
+    // primitives that already exist (the semantic exterior-wall polyline
+    // tool, endpoint/ortho snap, tool memory) rather than a new geometry
+    // pipeline - forces ortho-snap on and swaps the length readout to a
+    // running perimeter total so a whole building outline can be walked in
+    // one continuous click path.
+    if (sketchModeToggle) {
+        sketchModeToggle.addEventListener('click', function () {
+            if (sketchModeActive) {
+                finishMultiPointIfPending();
+                sketchModeActive = false;
+                sketchModeToggle.classList.remove('active');
+                switchToHandTool();
+                return;
+            }
+            var wallButton = document.querySelector(
+                TOOLBAR_SELECTOR + ' [data-semantic="wall"][data-wall-subtype="exterior"]'
+            );
+            if (!wallButton) {
+                return;
+            }
+            sketchModeActive = true;
+            // activateTool() (run synchronously inside wallButton's own click
+            // handler) clears .active off every toolbar button as part of its
+            // own bookkeeping, so this has to be re-applied after, not before.
+            wallButton.click();
+            sketchModeToggle.classList.add('active');
+            if (isCalibrated) {
+                toolHint.textContent = 'Sketch Mode: click each corner around the building outline - '
+                    + 'snapping is locked to square angles. Enter or double-click to finish this run, '
+                    + 'Esc or click Sketch Mode again to exit.';
+            }
+        });
+    }
+
     function updateMeasureReadout(pointer, domEvent) {
         var measuring = isCalibrated && scalePixelsPerFoot
             && SNAPPING_TOOLS.indexOf(activeTool) !== -1 && pendingPoints.length > 0;
@@ -1228,9 +1288,14 @@ document.addEventListener('DOMContentLoaded', function () {
             measureReadout.hidden = true;
             return;
         }
-        var previous = pendingPoints[pendingPoints.length - 1];
-        var distPx = Math.hypot(pointer.x - previous.x, pointer.y - previous.y);
-        measureReadout.textContent = formatFeetInches(distPx / scalePixelsPerFoot);
+        // Sketch Mode is about walking a whole perimeter in one go, so the
+        // readout tracks total distance placed so far, not just the segment
+        // in progress - otherwise there's no running sense of how much
+        // wall you've laid out.
+        var distPx = sketchModeActive
+            ? cumulativePendingLengthPx(pointer)
+            : Math.hypot(pointer.x - pendingPoints[pendingPoints.length - 1].x, pointer.y - pendingPoints[pendingPoints.length - 1].y);
+        measureReadout.textContent = (sketchModeActive ? 'Total: ' : '') + formatFeetInches(distPx / scalePixelsPerFoot);
         var rect = canvasWrapEl.getBoundingClientRect();
         measureReadout.style.left = (domEvent.clientX - rect.left + canvasWrapEl.scrollLeft + 16) + 'px';
         measureReadout.style.top = (domEvent.clientY - rect.top + canvasWrapEl.scrollTop + 16) + 'px';
@@ -1583,6 +1648,7 @@ document.addEventListener('DOMContentLoaded', function () {
         b: TOOLBAR_SELECTOR + ' [data-semantic="beam"]',
     };
     var SHORTCUT_SINGLES = {
+        s: '#sketch-mode-toggle',
         m: '#measure-tool-button',
         j: TOOLBAR_SELECTOR + ' [data-semantic="joist"]',
         c: TOOLBAR_SELECTOR + ' [data-semantic="column"]',
