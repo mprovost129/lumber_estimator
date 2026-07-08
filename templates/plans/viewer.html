@@ -535,6 +535,12 @@
                 </div>
                 <div class="dropdown-divider"></div>
                 <button type="button" class="btn btn-outline-danger w-100" id="material-delete-linked" disabled>Delete linked</button>
+                <div class="dropdown-divider"></div>
+                <div class="small fw-semibold text-uppercase text-muted mb-2 mt-2">Page cleanup</div>
+                <button type="button" class="btn btn-outline-secondary w-100" id="fix-wall-joints-button"
+                        title="Snaps wall endpoints that are close but not quite touching to a shared point. Your material list already counts these as joined within a small tolerance - this only closes the visual gap.">
+                    Fix nearby wall joints
+                </button>
             </div>
         </div>
         <p class="small text-muted mb-2" id="material-list-status">Showing all estimate rows. Select a material row to highlight matching traces on this page.</p>

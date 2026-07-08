@@ -178,6 +178,9 @@ document.addEventListener('DOMContentLoaded', function () {
     var previewObject = null;      // rubber-band preview while drawing
     var selectedTrace = null;
     var linkedTraceIds = [];
+    var vertexEditObj = null;      // the line/polyline trace currently showing drag handles
+    var vertexHandles = [];
+    var vertexGhost = null;        // live dashed preview rebuilt while a handle is dragged
     var hoveredTraceIds = [];
     var activeMaterialSummary = null;
     var activeLinkedTraceIndex = -1;
@@ -227,6 +230,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 syncMaterialListSelection();
                 updateMaterialToolbarState();
                 applyMaterialVisibility();
+                annotateMaterialCategoryHeaders();
             })
             .catch(function () { /* not on the critical path - the panel just stays stale */ });
     }
@@ -323,6 +327,47 @@ document.addEventListener('DOMContentLoaded', function () {
         activeMaterialSummary = materialSummaryFromRow(row);
         activateLinkedTraceIds(traceIds);
     });
+    // Category headers double as clickable summary cards: one click
+    // highlights every traced element feeding that construction system on
+    // this page, the same way a single material row does for its own rows.
+    document.getElementById('material-list-content').addEventListener('click', function (event) {
+        var header = event.target.closest('.material-summary-group-header');
+        if (!header) {
+            return;
+        }
+        var group = header.closest('.material-summary-group');
+        if (!group) {
+            return;
+        }
+        var traceIds = [];
+        group.querySelectorAll('.material-summary-row[data-trace-ids]').forEach(function (row) {
+            parseTraceIds(row.dataset.traceIds).forEach(function (traceId) {
+                if (traceIds.indexOf(traceId) === -1) {
+                    traceIds.push(traceId);
+                }
+            });
+        });
+        if (!traceIds.length) {
+            return;
+        }
+        activateLinkedTraceIds(traceIds);
+    });
+
+    function annotateMaterialCategoryHeaders() {
+        document.querySelectorAll('#material-list-content .material-summary-group').forEach(function (group) {
+            var rows = group.querySelectorAll('.material-summary-row');
+            var totalQuantity = 0;
+            rows.forEach(function (row) {
+                totalQuantity += parseFloat(row.dataset.quantity) || 0;
+            });
+            var badge = group.querySelector('.material-summary-group-count');
+            if (badge) {
+                badge.textContent = rows.length + ' line' + (rows.length === 1 ? '' : 's')
+                    + ' · ' + totalQuantity + ' pcs';
+            }
+        });
+    }
+
     document.getElementById('material-list-content').addEventListener('mouseover', function (event) {
         var row = event.target.closest('.material-summary-row');
         if (!row) {
@@ -1192,6 +1237,113 @@ document.addEventListener('DOMContentLoaded', function () {
         measureReadout.hidden = false;
     }
 
+    // ---- floating quick-edit HUD ----
+    // A small canvas-anchored popover for the handful of fields worth
+    // editing without leaving the drawing surface (material + the one or two
+    // settings that matter most for the selected trace's type). It mirrors
+    // values into the real sidebar inspector fields and dispatches their
+    // native events, so the existing auto-save pipeline (scheduleSelectedTracePersist)
+    // is the only place persistence logic lives - the HUD has none of its own.
+    var quickHud = document.createElement('div');
+    quickHud.id = 'trace-quick-hud';
+    var quickHudMaterialWrap = document.createElement('div');
+    var quickHudMaterialLabel = document.createElement('label');
+    quickHudMaterialLabel.textContent = 'Material';
+    var quickHudMaterialSelect = document.createElement('select');
+    quickHudMaterialWrap.appendChild(quickHudMaterialLabel);
+    quickHudMaterialWrap.appendChild(quickHudMaterialSelect);
+    var quickHudFieldsWrap = document.createElement('div');
+    quickHud.appendChild(quickHudMaterialWrap);
+    quickHud.appendChild(quickHudFieldsWrap);
+    canvasWrapEl.appendChild(quickHud);
+
+    var QUICK_HUD_FIELD_ID_MAP = {
+        stud_spacing_in: 'inspector-stud-spacing-input',
+        wall_height_in: 'inspector-wall-height-input',
+        spacing_in: 'inspector-spacing-input',
+    };
+
+    function quickHudPrimaryFields(toolType, settings) {
+        var isOpenPolyline = toolType === 'polyline' && !(settings || {}).closed;
+        if (toolType === 'line' || isOpenPolyline) {
+            return [
+                { key: 'stud_spacing_in', label: 'Stud spacing (in)', step: '1', value: (settings || {}).stud_spacing_in },
+                { key: 'wall_height_in', label: 'Wall height (in)', step: '0.125', value: (settings || {}).wall_height_in },
+            ];
+        }
+        if (toolType === 'area') {
+            return [{ key: 'spacing_in', label: 'Spacing (in)', step: '1', value: (settings || {}).spacing_in }];
+        }
+        return [];
+    }
+
+    function canvasPointToWrapCoords(point) {
+        var canvasRect = canvas.upperCanvasEl.getBoundingClientRect();
+        var wrapRect = canvasWrapEl.getBoundingClientRect();
+        var scaleX = canvasRect.width / canvas.width;
+        var scaleY = canvasRect.height / canvas.height;
+        return {
+            x: canvasRect.left + point.x * scaleX - wrapRect.left + canvasWrapEl.scrollLeft,
+            y: canvasRect.top + point.y * scaleY - wrapRect.top + canvasWrapEl.scrollTop,
+        };
+    }
+
+    function positionQuickHud(obj) {
+        var anchor = obj.traceGeometry && obj.traceGeometry[0];
+        if (!anchor) {
+            return;
+        }
+        var coords = canvasPointToWrapCoords(anchor);
+        quickHud.style.left = (coords.x + 14) + 'px';
+        quickHud.style.top = (coords.y - 14) + 'px';
+    }
+
+    function showQuickHud(obj) {
+        if (!obj) {
+            return;
+        }
+        quickHudMaterialSelect.innerHTML = materialSelect.innerHTML;
+        quickHudMaterialSelect.value = obj.traceMaterialId || '';
+        quickHudFieldsWrap.innerHTML = '';
+        quickHudPrimaryFields(obj.traceToolType, obj.traceSettings).forEach(function (field) {
+            var wrap = document.createElement('div');
+            wrap.className = 'quick-hud-field';
+            var label = document.createElement('label');
+            label.textContent = field.label;
+            var input = document.createElement('input');
+            input.type = 'number';
+            input.step = field.step;
+            input.value = field.value || '';
+            input.dataset.settingsKey = field.key;
+            wrap.appendChild(label);
+            wrap.appendChild(input);
+            quickHudFieldsWrap.appendChild(wrap);
+        });
+        positionQuickHud(obj);
+        quickHud.style.display = 'block';
+    }
+
+    function hideQuickHud() {
+        quickHud.style.display = 'none';
+    }
+
+    quickHudMaterialSelect.addEventListener('change', function () {
+        inspectorMaterialSelect.value = quickHudMaterialSelect.value;
+        inspectorMaterialSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    quickHudFieldsWrap.addEventListener('input', function (event) {
+        var input = event.target.closest('input[data-settings-key]');
+        if (!input) {
+            return;
+        }
+        var sidebarInput = document.getElementById(QUICK_HUD_FIELD_ID_MAP[input.dataset.settingsKey]);
+        if (!sidebarInput) {
+            return;
+        }
+        sidebarInput.value = input.value;
+        sidebarInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
     // ---- one-click opening placement ----
     function nearestWallSegment(pointer, maxDist) {
         var geometries = [];
@@ -1955,6 +2107,232 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // --------------------------------------------------- vertex drag editing
+    // Selecting a line/polyline trace shows small draggable grips at each of
+    // its points. Dragging rebuilds a dashed ghost preview live (reusing
+    // buildTraceObject rather than mutating the real Fabric shape's own
+    // points array, which is fragile for Polyline); the real trace is only
+    // PATCHed - and its Fabric object rebuilt from the server's answer -
+    // once a grip is released.
+
+    function clearVertexHandles() {
+        vertexHandles.forEach(function (handle) { canvas.remove(handle); });
+        vertexHandles = [];
+        if (vertexGhost) {
+            canvas.remove(vertexGhost);
+            vertexGhost = null;
+        }
+    }
+
+    function exitVertexEditMode() {
+        if (vertexEditObj) {
+            vertexEditObj.set({ opacity: 1 });
+        }
+        clearVertexHandles();
+        vertexEditObj = null;
+        canvas.requestRenderAll();
+    }
+
+    function enterVertexEditMode(obj) {
+        exitVertexEditMode();
+        if (!obj || (obj.traceToolType !== 'line' && obj.traceToolType !== 'polyline')) {
+            return;
+        }
+        vertexEditObj = obj;
+        obj.set({ opacity: 0.3 });
+        vertexHandles = (obj.traceGeometry || []).map(function (point, index) {
+            var handle = new fabric.Circle({
+                left: point.x, top: point.y, radius: 6, fill: '#ffffff',
+                stroke: '#0d6efd', strokeWidth: 2, originX: 'center', originY: 'center',
+                hasControls: false, hasBorders: false, selectable: true, hoverCursor: 'move',
+                lockScalingX: true, lockScalingY: true, lockRotation: true,
+                traceVertexHandle: true, vertexIndex: index,
+            });
+            canvas.add(handle);
+            return handle;
+        });
+        canvas.requestRenderAll();
+    }
+
+    function rebuildVertexGhost() {
+        if (!vertexEditObj) {
+            return;
+        }
+        if (vertexGhost) {
+            canvas.remove(vertexGhost);
+        }
+        var geometry = vertexHandles.map(function (handle) { return { x: handle.left, y: handle.top }; });
+        vertexGhost = buildTraceObject({
+            tool_type: vertexEditObj.traceToolType, geometry: geometry,
+            settings: vertexEditObj.traceSettings || {},
+            color: vertexEditObj.traceColor || TOOLS[vertexEditObj.traceToolType].color,
+        });
+        vertexGhost.set({ selectable: false, evented: false, strokeDashArray: [8, 4] });
+        canvas.add(vertexGhost);
+        vertexHandles.forEach(function (handle) { canvas.bringToFront(handle); });
+        canvas.requestRenderAll();
+    }
+
+    function finishVertexDrag() {
+        if (!vertexEditObj) {
+            return;
+        }
+        var obj = vertexEditObj;
+        var geometry = vertexHandles.map(function (handle) {
+            return { x: Math.round(handle.left), y: Math.round(handle.top) };
+        });
+        var payload = {
+            material_id: obj.traceMaterialId || null,
+            assembly_id: obj.traceAssemblyId || null,
+            parent_wall_id: obj.traceParentWallId || null,
+            color: obj.traceColor || '',
+            settings: obj.traceSettings || {},
+            geometry: geometry,
+        };
+        persistTraceUpdate(obj, payload)
+            .then(function (trace) {
+                exitVertexEditMode();
+                canvas.remove(obj);
+                var fresh = drawTrace(trace);
+                refreshMaterialList();
+                selectTraceObject(fresh);
+            })
+            .catch(function (error) {
+                exitVertexEditMode();
+                showError(error);
+            });
+    }
+
+    canvas.on('object:moving', function (opt) {
+        if (opt.target && opt.target.traceVertexHandle) {
+            rebuildVertexGhost();
+        }
+    });
+    canvas.on('object:modified', function (opt) {
+        if (opt.target && opt.target.traceVertexHandle) {
+            finishVertexDrag();
+        }
+    });
+
+    // ------------------------------------------------- automatic wall joining
+    // The calc engine already treats wall endpoints within JUNCTION_TOLERANCE_FT
+    // (0.5 ft, plans/wall_junctions.py) as touching for corner/T-stud counting,
+    // but a small drafting gap still looks wrong on screen. This is a purely
+    // cosmetic snap - it never changes a material quantity that wasn't already
+    // being counted as joined.
+    var WALL_JOIN_TOLERANCE_FT = 0.5;
+
+    function wallEndpoints() {
+        var points = [];
+        canvas.getObjects().forEach(function (obj) {
+            if (!obj.traceId || (obj.traceToolType !== 'line' && obj.traceToolType !== 'polyline')) {
+                return;
+            }
+            var geometry = obj.traceGeometry || [];
+            if (geometry.length < 2) {
+                return;
+            }
+            points.push({ obj: obj, pointIndex: 0, x: geometry[0].x, y: geometry[0].y });
+            var lastIndex = geometry.length - 1;
+            points.push({ obj: obj, pointIndex: lastIndex, x: geometry[lastIndex].x, y: geometry[lastIndex].y });
+        });
+        return points;
+    }
+
+    function findNearbyWallGaps() {
+        if (!scalePixelsPerFoot) {
+            return [];
+        }
+        var toleranceInPx = WALL_JOIN_TOLERANCE_FT * scalePixelsPerFoot;
+        var points = wallEndpoints();
+        var claimed = {};
+        var merges = [];
+        for (var i = 0; i < points.length; i++) {
+            var a = points[i];
+            var aKey = a.obj.traceId + ':' + a.pointIndex;
+            if (claimed[aKey]) {
+                continue;
+            }
+            for (var j = i + 1; j < points.length; j++) {
+                var b = points[j];
+                if (b.obj.traceId === a.obj.traceId) {
+                    continue;
+                }
+                var bKey = b.obj.traceId + ':' + b.pointIndex;
+                if (claimed[bKey]) {
+                    continue;
+                }
+                var dist = Math.hypot(a.x - b.x, a.y - b.y);
+                if (dist > 0 && dist <= toleranceInPx) {
+                    merges.push({ a: a, b: b, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+                    claimed[aKey] = true;
+                    claimed[bKey] = true;
+                    break;
+                }
+            }
+        }
+        return merges;
+    }
+
+    function fixNearbyWallJoints() {
+        var merges = findNearbyWallGaps();
+        if (!merges.length) {
+            lastMeasurement.textContent = 'No nearby wall gaps found on this page.';
+            return;
+        }
+        var updatesByTraceId = {};
+        merges.forEach(function (merge) {
+            [merge.a, merge.b].forEach(function (endpoint) {
+                var id = endpoint.obj.traceId;
+                if (!updatesByTraceId[id]) {
+                    updatesByTraceId[id] = {
+                        obj: endpoint.obj,
+                        geometry: (endpoint.obj.traceGeometry || []).map(function (p) { return { x: p.x, y: p.y }; }),
+                    };
+                }
+                updatesByTraceId[id].geometry[endpoint.pointIndex] = { x: Math.round(merge.x), y: Math.round(merge.y) };
+            });
+        });
+        // Sequential, not Promise.all: two walls that both end up on each
+        // other's junction-regen pass (_regenerate_sibling_walls) can
+        // deadlock in Postgres if their UPDATE transactions overlap - each
+        // one locks its own LineItems first, then reaches for the other's.
+        // Running the requests one at a time means each transaction commits
+        // before the next starts, so the lock order can never cross.
+        var traceIds = Object.keys(updatesByTraceId);
+        var chain = Promise.resolve();
+        traceIds.forEach(function (id) {
+            chain = chain.then(function () {
+                var entry = updatesByTraceId[id];
+                var obj = entry.obj;
+                var payload = {
+                    material_id: obj.traceMaterialId || null,
+                    assembly_id: obj.traceAssemblyId || null,
+                    parent_wall_id: obj.traceParentWallId || null,
+                    color: obj.traceColor || '',
+                    settings: obj.traceSettings || {},
+                    geometry: entry.geometry,
+                };
+                return persistTraceUpdate(obj, payload).then(function (trace) {
+                    canvas.remove(obj);
+                    drawTrace(trace);
+                });
+            });
+        });
+        chain
+            .then(function () {
+                canvas.requestRenderAll();
+                refreshMaterialList();
+                lastMeasurement.textContent = 'Closed ' + merges.length + ' nearby wall gap' + (merges.length === 1 ? '' : 's') + '.';
+            })
+            .catch(showError);
+    }
+
+    var fixWallJointsButton = document.getElementById('fix-wall-joints-button');
+    if (fixWallJointsButton) {
+        fixWallJointsButton.addEventListener('click', fixNearbyWallJoints);
+    }
+
     function onTraceSelected() {
         var obj = canvas.getActiveObject();
         var selectedObjects = canvasSelectionTraceObjects(obj);
@@ -1963,6 +2341,8 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (selectedObjects.length > 1) {
             activateTool(null);
+            exitVertexEditMode();
+            hideQuickHud();
             selectedTrace = null;
             if (tracePersistTimer) {
                 clearTimeout(tracePersistTimer);
@@ -2011,6 +2391,8 @@ document.addEventListener('DOMContentLoaded', function () {
         scrollMaterialRowIntoView(linkedTraceIds);
         updateMaterialToolbarState();
         showPanel('inspector');
+        enterVertexEditMode(obj);
+        showQuickHud(obj);
     }
 
     function renderInspectorSettings(toolType, settings) {
@@ -2180,6 +2562,8 @@ document.addEventListener('DOMContentLoaded', function () {
             clearTimeout(tracePersistTimer);
             tracePersistTimer = null;
         }
+        exitVertexEditMode();
+        hideQuickHud();
         selectedTrace = null;
         linkedTraceIds = [];
         activeMaterialSummary = null;
@@ -2421,6 +2805,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 obj.traceParentWallId = trace.parent_wall_id;
                 obj.traceColor = trace.color;
                 obj.traceSettings = trace.settings || {};
+                obj.traceGeometry = trace.geometry || obj.traceGeometry;
                 obj.traceMeasurement = trace.measurement_display || obj.traceMeasurement;
                 restyleTrace(obj);
                 updateIncompleteMarker(obj);

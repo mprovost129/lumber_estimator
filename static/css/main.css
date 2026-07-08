@@ -918,6 +918,40 @@ body.asm-drawer-open { overflow: hidden; }
 }
 
 /* =============================================================================
+   Plan viewer: floating quick-edit HUD for the selected trace
+   ============================================================================= */
+
+#trace-quick-hud {
+    position: absolute;
+    z-index: 15;
+    display: none;
+    min-width: 190px;
+    background: var(--bs-white, #fff);
+    border: 1px solid var(--brand-gray-border);
+    border-radius: var(--bs-border-radius, 8px);
+    box-shadow: var(--shadow-md);
+    padding: 0.55rem 0.65rem;
+    font-size: 0.78rem;
+}
+#trace-quick-hud .quick-hud-field {
+    margin-top: 0.35rem;
+}
+#trace-quick-hud label {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--brand-gray-muted, #6c757d);
+    margin-bottom: 0.1rem;
+}
+#trace-quick-hud select,
+#trace-quick-hud input {
+    width: 100%;
+    font-size: 0.78rem;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--brand-gray-border);
+    border-radius: 5px;
+}
+
+/* =============================================================================
    Email verification banner
    ============================================================================= */
 
