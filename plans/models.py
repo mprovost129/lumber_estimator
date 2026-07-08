@@ -124,19 +124,15 @@ class ToolPreset(models.Model):
     material = models.ForeignKey(
         'catalog.MaterialProduct', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_presets',
     )
-    assembly = models.ForeignKey(
-        'estimating.Assembly', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_presets',
-    )
     settings = models.JSONField(default=dict, blank=True)
     color = models.CharField(
         max_length=7, blank=True, validators=[color_validator],
         help_text='Optional display color in #RRGGBB format.',
     )
-    is_favorite = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-is_favorite', 'name']
+        ordering = ['name']
         constraints = [
             models.UniqueConstraint(
                 fields=['account', 'tool_type', 'name'], name='unique_preset_name_per_account_tool',
