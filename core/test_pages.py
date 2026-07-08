@@ -39,8 +39,8 @@ class PricingPageTests(TestCase):
         self.assertContains(response, 'Starter')
         self.assertContains(response, '$29 / month')
         self.assertContains(response, 'Pro')
-        # Anonymous visitors are sent to sign in, not to checkout.
-        self.assertContains(response, 'Sign in to subscribe')
+        # Anonymous visitors are sent to create an account, not to checkout.
+        self.assertContains(response, 'Sign up to subscribe')
 
     def test_signed_in_user_gets_subscribe_forms(self):
         user = User.objects.create_user(email='pricing@example.com', password='testpass123')

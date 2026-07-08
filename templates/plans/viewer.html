@@ -10,20 +10,28 @@
 {% block extra_css %}
 <style>
     #plan-viewer { display: flex; gap: 1rem; align-items: flex-start; }
-    #tool-sidebar {
-        width: 56px; display: flex; flex-direction: column; gap: 0.5rem; flex-shrink: 0;
-        background-color: var(--bs-white); border: 1px solid var(--brand-gray-border);
-        border-radius: var(--bs-border-radius); padding: 0.5rem;
+    #canvas-column { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+    #viewer-toolbar {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+        padding: 0.75rem; background-color: var(--bs-white);
+        border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius);
     }
-    #tool-sidebar .tool-btn {
-        width: 44px; height: 44px; padding: 0; font-size: 1.25rem;
+    .viewer-toolbar-group {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+    }
+    .viewer-toolbar-divider {
+        width: 1px; align-self: stretch; background: var(--brand-gray-border);
+    }
+    #viewer-toolbar .tool-btn,
+    .viewer-page-tools .tool-btn {
+        width: 42px; height: 42px; padding: 0; font-size: 1.1rem;
         display: flex; align-items: center; justify-content: center;
     }
-    #canvas-column { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
     #zoom-level { min-width: 3.5em; text-align: center; }
     #plan-canvas-wrap {
         border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius);
         overflow: auto; min-width: 0; height: 80vh; background-color: var(--bs-white);
+        position: relative; /* anchors the live drawing measurement readout */
     }
     #tool-panel {
         width: 280px; flex-shrink: 0; background-color: var(--bs-white);
@@ -34,13 +42,24 @@
         border: 1px solid var(--brand-gray-border); border-radius: var(--bs-border-radius); padding: 1rem;
         max-height: 80vh; overflow-y: auto;
     }
-    .material-list-toolbar {
-        display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;
+    .material-controls-trigger {
+        width: 100%;
+        justify-content: space-between;
     }
-    .material-list-toolbar .btn {
+    .material-controls-menu {
+        width: min(320px, calc(100vw - 3rem));
+        padding: 0.75rem;
+    }
+    .material-controls-menu .btn,
+    .material-controls-menu .dropdown-item {
         --bs-btn-padding-y: 0.2rem;
         --bs-btn-padding-x: 0.55rem;
         --bs-btn-font-size: 0.8rem;
+    }
+    .material-controls-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
     }
     #material-list-status {
         min-height: 2.25rem;
@@ -82,9 +101,28 @@
     .wall-edit-toolbar .active { box-shadow: inset 0 0 0 2px rgba(58,124,165,.35); }
     .wall-help-badge { font-size: .75rem; }
     .viewer-page-tools { display: flex; align-items: center; gap: 0.5rem; }
-    .viewer-page-tools .tool-btn {
-        width: 38px; height: 38px; padding: 0;
-        display: inline-flex; align-items: center; justify-content: center;
+    #page-strip {
+        background-color: var(--bs-white);
+        border: 1px solid var(--brand-gray-border);
+        border-radius: var(--bs-border-radius);
+        padding: 0.5rem;
+    }
+    @media (max-width: 1399px) {
+        #plan-viewer { flex-wrap: wrap; }
+        #tool-panel, #material-list-panel {
+            width: calc(50% - 0.5rem);
+            max-height: none;
+        }
+    }
+    #trace-context-menu {
+        position: fixed; z-index: 1100; min-width: 190px; display: none;
+    }
+    @media (max-width: 991px) {
+        #plan-viewer { flex-direction: column; }
+        #tool-panel, #material-list-panel { width: 100%; max-height: none; }
+        #plan-canvas-wrap { height: 65vh; }
+        .viewer-toolbar-divider { display: none; }
+        .material-controls-grid { grid-template-columns: 1fr; }
     }
 </style>
 {% endblock %}
@@ -100,6 +138,14 @@
         </button>
     </h1>
     <div class="viewer-page-tools no-print">
+        {% if project_pages|length > 1 %}
+        <button type="button" id="prev-page-button" class="tool-btn btn btn-outline-secondary viewer-header-tool" title="Previous page (Page Up)">
+            <i class="bi bi-chevron-left"></i>
+        </button>
+        <button type="button" id="next-page-button" class="tool-btn btn btn-outline-secondary viewer-header-tool" title="Next page (Page Down)">
+            <i class="bi bi-chevron-right"></i>
+        </button>
+        {% endif %}
         <button type="button" id="header-calibrate-tool" class="tool-btn btn btn-outline-secondary viewer-header-tool" data-tool="calibrate" title="Calibrate Scale">
             <i class="bi bi-rulers"></i>
         </button>
@@ -113,115 +159,129 @@
     &middot; <a href="{% url 'estimating:estimate-detail' estimate.pk %}">Material List</a>
 </p>
 
-{% if project_pages|length > 1 %}
-<div id="page-strip" class="no-print" aria-label="Plan pages">
-    {% for p in project_pages %}
-    <a class="page-strip-item {% if p.pk == page.pk %}is-current{% endif %}"
-       href="{% url 'plans:viewer' p.pk %}"
-       title="{{ p.display_label }}{% if not p.scale_pixels_per_foot %} (not calibrated){% endif %}">
-        <img src="{{ p.thumbnail.url }}" alt="{{ p.display_label }}" loading="lazy">
-        <span class="page-strip-label">{{ p.display_label }}</span>
-        {% if not p.scale_pixels_per_foot %}<span class="page-strip-dot"></span>{% endif %}
-    </a>
-    {% endfor %}
-</div>
-{% endif %}
-
 <div id="plan-viewer"
+     data-project-id="{{ project.pk }}"
      data-page-id="{{ page.pk }}"
+     data-scale-pixels-per-foot="{{ page.scale_pixels_per_foot|default_if_none:'' }}"
      data-image-url="{{ page.image.url }}"
      data-trace-create-url="{% url 'plans:trace-create' page.pk %}"
      data-trace-update-url-base="{% url 'plans:trace-update' 0 %}"
      data-trace-delete-url-base="{% url 'plans:trace-delete' 0 %}"
+     data-trace-batch-update-url="{% url 'plans:trace-batch-update' %}"
+     data-trace-batch-delete-url="{% url 'plans:trace-batch-delete' %}"
      data-wall-detail-url-base="{% url 'plans:wall-elevation' 0 %}"
      data-calibrate-url="{% url 'plans:page-calibrate' page.pk %}"
      data-presets-url="{% url 'plans:presets' %}"
+     data-preset-favorite-url-base="{% url 'plans:preset-favorite' 0 %}"
      data-material-summary-url="{% url 'estimating:estimate-material-summary' estimate.pk %}"
      data-default-stud-spacing="{{ default_stud_spacing_in }}"
      data-default-wall-height="{{ default_wall_height_in }}"
      data-is-calibrated="{{ is_calibrated|yesno:'true,false' }}">
 
-    <div id="tool-sidebar">
-        <div class="dropdown">
-            <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Wall (W)">
-                <i class="bi bi-bricks"></i>
-            </button>
-            <ul class="dropdown-menu">
-                <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="exterior">Exterior Wall</button></li>
-                <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="interior_bearing">Interior Bearing Wall</button></li>
-                <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="interior_non_bearing">Interior Non-Bearing Wall</button></li>
-            </ul>
-        </div>
-        <div class="dropdown">
-            <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Opening (O)">
-                <i class="bi bi-door-open"></i>
-            </button>
-            <ul class="dropdown-menu">
-                <li><button type="button" class="dropdown-item" data-semantic="opening" data-opening-kind="window">Window</button></li>
-                <li><button type="button" class="dropdown-item" data-semantic="opening" data-opening-kind="door">Door</button></li>
-            </ul>
-        </div>
-        <div class="dropdown">
-            <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Beam (B)">
-                <i class="bi bi-layout-text-window"></i>
-            </button>
-            <ul class="dropdown-menu">
-                <li><button type="button" class="dropdown-item" data-semantic="beam" data-beam-type="flush">Flush Beam</button></li>
-                <li><button type="button" class="dropdown-item" data-semantic="beam" data-beam-type="dropped">Dropped Beam</button></li>
-            </ul>
-        </div>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="joist" title="Joist (J)">
-            <i class="bi bi-grid-3x3"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="column" title="Column (C)">
-            <i class="bi bi-record-circle"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="plate" title="Plate (P)">
-            <i class="bi bi-dash-lg"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="rim_board" title="Rim Board (R)">
-            <i class="bi bi-square"></i>
-        </button>
-
-        <hr class="my-1">
-
-        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="line" title="Draw Wall">
-            <i class="bi bi-bricks"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="area" title="Draw Area Assembly">
-            <i class="bi bi-bounding-box-circles"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="polyline" title="Polyline / Custom Shape">
-            <i class="bi bi-bezier2"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="count" title="Count (Posts / Hardware)">
-            <i class="bi bi-123"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-primary" data-tool="opening" title="Draw Opening">
-            <i class="bi bi-door-open"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-secondary" data-tool="hand" title="Pan / Hand Tool (H)">
-            <i class="bi bi-hand-index"></i>
-        </button>
-        <button type="button" class="tool-btn btn btn-outline-danger" id="delete-selected" title="Delete Selected">
-            <i class="bi bi-trash"></i>
-        </button>
-    </div>
-
     <div id="canvas-column">
-        <div id="zoom-controls" class="d-flex align-items-center gap-2 mb-2">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-out" title="Zoom Out">
-                <i class="bi bi-dash-lg"></i>
-            </button>
-            <span id="zoom-level" class="small text-muted">100%</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-in" title="Zoom In">
-                <i class="bi bi-plus-lg"></i>
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-reset" title="Reset to 100%">Reset</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-fit" title="Fit to window">Fit</button>
+        <div id="viewer-toolbar" class="no-print">
+            <div id="tool-toolbar" class="viewer-toolbar-group">
+                <div class="dropdown">
+                    <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Wall (W)">
+                        <i class="bi bi-bricks"></i>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="exterior">Exterior Wall</button></li>
+                        <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="interior_bearing">Interior Bearing Wall</button></li>
+                        <li><button type="button" class="dropdown-item" data-semantic="wall" data-wall-subtype="interior_non_bearing">Interior Non-Bearing Wall</button></li>
+                    </ul>
+                </div>
+                <div class="dropdown">
+                    <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Opening (O)">
+                        <i class="bi bi-door-open"></i>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button type="button" class="dropdown-item" data-semantic="opening" data-opening-kind="window">Window</button></li>
+                        <li><button type="button" class="dropdown-item" data-semantic="opening" data-opening-kind="door">Door</button></li>
+                    </ul>
+                </div>
+                <div class="dropdown">
+                    <button type="button" class="tool-btn btn btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" title="Beam (B)">
+                        <i class="bi bi-layout-text-window"></i>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button type="button" class="dropdown-item" data-semantic="beam" data-beam-type="flush">Flush Beam</button></li>
+                        <li><button type="button" class="dropdown-item" data-semantic="beam" data-beam-type="dropped">Dropped Beam</button></li>
+                    </ul>
+                </div>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="joist" title="Joist (J)">
+                    <i class="bi bi-grid-3x3"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="column" title="Column (C)">
+                    <i class="bi bi-record-circle"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="plate" title="Plate (P)">
+                    <i class="bi bi-dash-lg"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-semantic="rim_board" title="Rim Board (R)">
+                    <i class="bi bi-square"></i>
+                </button>
+                <span class="viewer-toolbar-divider" aria-hidden="true"></span>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-tool="line" title="Draw Wall">
+                    <i class="bi bi-bricks"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-tool="area" title="Draw Area Assembly">
+                    <i class="bi bi-bounding-box-circles"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-tool="polyline" title="Polyline / Custom Shape">
+                    <i class="bi bi-bezier2"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-tool="count" title="Count (Posts / Hardware)">
+                    <i class="bi bi-123"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-primary" data-tool="opening" title="Draw Opening">
+                    <i class="bi bi-door-open"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-secondary" id="measure-tool-button" data-tool="measure" title="Measure / Verify (M)">
+                    <i class="bi bi-rulers"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-secondary" data-tool="hand" title="Pan / Hand Tool (H)">
+                    <i class="bi bi-hand-index"></i>
+                </button>
+                <button type="button" class="tool-btn btn btn-outline-danger" id="delete-selected" title="Delete Selected">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            <span class="viewer-toolbar-divider" aria-hidden="true"></span>
+            <div id="zoom-controls" class="viewer-toolbar-group">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-out" title="Zoom Out">
+                    <i class="bi bi-dash-lg"></i>
+                </button>
+                <span id="zoom-level" class="small text-muted">100%</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-in" title="Zoom In">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-reset" title="Reset to 100%">Reset</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="zoom-fit" title="Fit to window">Fit</button>
+            </div>
         </div>
         <div id="plan-canvas-wrap">
             <canvas id="plan-canvas"></canvas>
+        </div>
+        {% if project_pages|length > 1 %}
+        <div id="page-strip" class="no-print" aria-label="Plan pages">
+            {% for p in project_pages %}
+            <a class="page-strip-item {% if p.pk == page.pk %}is-current{% endif %}"
+               href="{% url 'plans:viewer' p.pk %}"
+               title="{{ p.display_label }}{% if not p.scale_pixels_per_foot %} (not calibrated){% endif %}">
+                <img src="{{ p.thumbnail.url }}" alt="{{ p.display_label }}" loading="lazy">
+                <span class="page-strip-label">{{ p.display_label }}</span>
+                {% if not p.scale_pixels_per_foot %}<span class="page-strip-dot"></span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div id="trace-context-menu" class="dropdown-menu no-print">
+            <button type="button" class="dropdown-item" data-action="duplicate">Duplicate</button>
+            <button type="button" class="dropdown-item" data-action="select-similar">Select similar</button>
+            <button type="button" class="dropdown-item" data-action="apply-tool-setup">Apply current tool setup</button>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item text-danger" data-action="delete">Delete</button>
         </div>
     </div>
 
@@ -230,7 +290,7 @@
         <p class="small fw-bold" id="last-measurement"></p>
 
         <div id="no-selection-panel">
-            <p class="text-muted small mb-2">Select a tool on the left to draw, or click an existing trace to view or edit it.</p>
+            <p class="text-muted small mb-2">Select a tool from the toolbar above to draw, or click an existing trace to view or edit it.</p>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="dismiss-onboarding-tip">Got it</button>
         </div>
 
@@ -324,6 +384,10 @@
             </div>
             <div class="row g-2" data-field="opening-size">
                 <div class="col-4 mb-2">
+                    <label for="rough-width-input" class="form-label">Width</label>
+                    <input type="number" id="rough-width-input" class="form-control" value="36" min="1" step="0.5" title="Rough opening width in inches; one click on a wall places the opening at this width">
+                </div>
+                <div class="col-4 mb-2">
                     <label for="sill-height-input" class="form-label">Sill</label>
                     <input type="number" id="sill-height-input" class="form-control" value="36">
                 </div>
@@ -356,10 +420,14 @@
             </div>
 
             <h2 class="h5 mt-3">Presets</h2>
-            <div class="mb-2">
+            <p class="text-muted small mb-1">Presets save your assembly too, not just material and settings. Star one to keep it at the top of the list.</p>
+            <div class="input-group mb-2">
                 <select id="preset-select" class="form-select">
                     <option value="">-- load a preset --</option>
                 </select>
+                <button type="button" class="btn btn-outline-secondary" id="preset-favorite-toggle" title="Favorite this preset" disabled>
+                    <i class="bi bi-star"></i>
+                </button>
             </div>
             <div class="input-group mb-2">
                 <input type="text" id="preset-name-input" class="form-control" placeholder="Preset name">
@@ -370,6 +438,9 @@
         <div id="trace-inspector-panel" style="display: none;">
             <h2 class="h5" id="inspector-title">Selected Trace</h2>
             <p class="small text-muted" id="inspector-measurement"></p>
+            <p class="small text-warning-emphasis mb-2" id="inspector-confidence-status" style="display: none;">
+                <i class="bi bi-exclamation-triangle-fill"></i> <span id="inspector-confidence-text"></span>
+            </p>
             <div class="mb-2">
                 <label for="inspector-material-select" class="form-label">Material tag</label>
                 <select id="inspector-material-select" class="form-select">
@@ -393,8 +464,46 @@
             <div id="inspector-settings"></div>
             <p class="small text-muted mb-2" id="inspector-save-status">Changes save automatically.</p>
             <button type="button" class="btn btn-outline-secondary mb-2" id="view-wall-elevation" style="display: none;">Wall elevation / framing</button>
+            <button type="button" class="btn btn-outline-secondary" id="use-trace-for-new">Use for new traces</button>
+            <button type="button" class="btn btn-outline-secondary" id="duplicate-inspected-trace">Duplicate</button>
+            <button type="button" class="btn btn-outline-secondary" id="select-similar-inspected-trace" title="Select every trace on this page with the same tool type and material tag">Select similar</button>
             <button type="button" class="btn btn-primary" id="save-trace-changes">Save now</button>
             <button type="button" class="btn btn-outline-danger" id="delete-inspected-trace">Delete</button>
+        </div>
+
+        <div id="bulk-selection-panel" style="display: none;">
+            <h2 class="h5" id="bulk-selection-title">Bulk edit</h2>
+            <p class="small text-muted" id="bulk-selection-summary"></p>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="bulk-material-toggle">
+                <label class="form-check-label" for="bulk-material-toggle">Apply material tag</label>
+            </div>
+            <div class="mb-2">
+                <select id="bulk-material-select" class="form-select">
+                    {% include 'plans/_material_options.html' %}
+                </select>
+            </div>
+            <div id="bulk-assembly-wrap">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="bulk-assembly-toggle">
+                    <label class="form-check-label" for="bulk-assembly-toggle">Apply assembly</label>
+                </div>
+                <div class="mb-2">
+                    <select id="bulk-assembly-select" class="form-select"></select>
+                </div>
+            </div>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="bulk-color-toggle">
+                <label class="form-check-label" for="bulk-color-toggle">Apply color</label>
+            </div>
+            <div class="mb-3">
+                <input type="color" id="bulk-color-input" class="form-control form-control-color">
+            </div>
+            <p class="small text-muted mb-2">For same-type groups, the material controls menu can also apply the full active tool setup.</p>
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-primary" id="bulk-apply-button">Apply to selected</button>
+                <button type="button" class="btn btn-outline-danger" id="bulk-delete-button">Delete selected</button>
+            </div>
         </div>
     </div>
 
@@ -404,14 +513,29 @@
             Live totals for this project's estimate (all pages).
             <a href="{% url 'estimating:estimate-detail' estimate.pk %}">Full view &rarr;</a>
         </p>
-        <div class="material-list-toolbar">
-            <button type="button" class="btn btn-outline-secondary" id="material-page-scope">This page only: Off</button>
-            <button type="button" class="btn btn-outline-secondary" id="material-focus-linked" disabled>Focus linked: Off</button>
-            <button type="button" class="btn btn-outline-secondary" id="material-selected-only" disabled>Selected only: Off</button>
-            <button type="button" class="btn btn-outline-secondary" id="material-category-only" disabled>Current category: Off</button>
-            <button type="button" class="btn btn-outline-secondary" id="material-prev-linked" disabled>Prev match</button>
-            <button type="button" class="btn btn-outline-secondary" id="material-next-linked" disabled>Next match</button>
-            <button type="button" class="btn btn-outline-secondary" id="material-clear-linked" disabled>Clear linked</button>
+        <div class="dropdown mb-3">
+            <button type="button" class="btn btn-outline-secondary material-controls-trigger dropdown-toggle" id="material-controls-trigger" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                <span>Filters &amp; actions</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-end material-controls-menu">
+                <div class="small fw-semibold text-uppercase text-muted mb-2">Filters</div>
+                <div class="material-controls-grid mb-3">
+                    <button type="button" class="btn btn-outline-secondary" id="material-page-scope">This page only: Off</button>
+                    <button type="button" class="btn btn-outline-secondary" id="material-focus-linked" disabled>Focus linked: Off</button>
+                    <button type="button" class="btn btn-outline-secondary" id="material-selected-only" disabled>Selected only: Off</button>
+                    <button type="button" class="btn btn-outline-secondary" id="material-category-only" disabled>Current category: Off</button>
+                </div>
+                <div class="dropdown-divider"></div>
+                <div class="small fw-semibold text-uppercase text-muted mb-2 mt-2">Linked traces</div>
+                <div class="material-controls-grid mb-3">
+                    <button type="button" class="btn btn-outline-secondary" id="material-prev-linked" disabled>Prev match</button>
+                    <button type="button" class="btn btn-outline-secondary" id="material-next-linked" disabled>Next match</button>
+                    <button type="button" class="btn btn-outline-secondary" id="material-apply-tool-setup" disabled>Apply tool setup</button>
+                    <button type="button" class="btn btn-outline-secondary" id="material-clear-linked" disabled>Clear linked</button>
+                </div>
+                <div class="dropdown-divider"></div>
+                <button type="button" class="btn btn-outline-danger w-100" id="material-delete-linked" disabled>Delete linked</button>
+            </div>
         </div>
         <p class="small text-muted mb-2" id="material-list-status">Showing all estimate rows. Select a material row to highlight matching traces on this page.</p>
         <div id="selection-summary" class="small text-muted">
@@ -473,6 +597,7 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+<script src="{% static 'plans/viewer-helpers.js' %}"></script>
 <script src="{% static 'plans/viewer.js' %}"></script>
 <script>
 (function () {

@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from billing.models import AccountSubscription, EstimateAccessGrant
-from catalog.models import MaterialProduct
+from catalog.models import MaterialLength, MaterialProduct
 from plans.models import Trace
 from plans.test_traces import make_plan_page
 from projects.models import Estimate, Project
@@ -315,6 +315,145 @@ class ManualLineItemViewTests(TestCase):
         response = self.client.post(reverse('estimating:line-item-delete', args=[line_item.pk]))
         self.assertEqual(response.status_code, 404)
         self.assertTrue(LineItem.objects.filter(pk=line_item.pk).exists())
+
+
+class MaterialLibraryManagementTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='materials-a@example.com', password='testpass123')
+        self.other = User.objects.create_user(email='materials-b@example.com', password='testpass123')
+        self.client.force_login(self.user)
+        self.mine = MaterialProduct.objects.create(
+            account=self.user.account,
+            name='My Plate Stock',
+            category=MaterialProduct.Category.DIMENSIONAL,
+            input_type=MaterialProduct.InputType.FT,
+        )
+        MaterialLength.objects.create(product=self.mine, length_ft=Decimal('8'), is_default=True)
+        MaterialLength.objects.create(product=self.mine, length_ft=Decimal('16'))
+        self.foreign = MaterialProduct.objects.create(
+            account=self.other.account, name='Foreign Material', input_type=MaterialProduct.InputType.EACH,
+        )
+        self.stock = MaterialProduct.objects.create(name='Stock Material', input_type=MaterialProduct.InputType.EACH)
+
+    def test_user_can_create_material_from_library_form(self):
+        response = self.client.post(
+            reverse('estimating:material-create'),
+            {
+                'name': 'Custom Connector',
+                'category': MaterialProduct.Category.CONNECTORS,
+                'species': '',
+                'grade': '',
+                'nominal_dimension': '',
+                'supported_input_types': [MaterialProduct.InputType.BOX, MaterialProduct.InputType.EACH],
+                'input_type': MaterialProduct.InputType.BOX,
+                'quantity_per_box': '150',
+                'lengths': '',
+                'default_length': '',
+            },
+            follow=True,
+        )
+        self.assertRedirects(response, reverse('estimating:library'))
+        created = MaterialProduct.objects.get(account=self.user.account, name='Custom Connector')
+        self.assertEqual(created.quantity_per_box, 150)
+        self.assertEqual(
+            created.normalized_supported_input_types(),
+            [MaterialProduct.InputType.BOX, MaterialProduct.InputType.EACH],
+        )
+        self.assertContains(response, 'Custom Connector')
+        self.assertContains(response, 'created.')
+
+    def test_user_can_edit_owned_material_and_lengths(self):
+        response = self.client.post(
+            reverse('estimating:material-update', args=[self.mine.pk]),
+            {
+                'name': 'My Plate Stock Updated',
+                'category': MaterialProduct.Category.PRESSURE_TREATED,
+                'species': 'SPF',
+                'grade': '#2',
+                'nominal_dimension': '2x6',
+                'supported_input_types': [MaterialProduct.InputType.FT, MaterialProduct.InputType.EACH],
+                'input_type': MaterialProduct.InputType.FT,
+                'quantity_per_box': '',
+                'lengths': '10; 18',
+                'default_length': '18',
+            },
+            follow=True,
+        )
+        self.assertRedirects(response, reverse('estimating:library'))
+        self.mine.refresh_from_db()
+        self.assertEqual(self.mine.name, 'My Plate Stock Updated')
+        self.assertEqual(self.mine.category, MaterialProduct.Category.PRESSURE_TREATED)
+        self.assertEqual(
+            self.mine.normalized_supported_input_types(),
+            [MaterialProduct.InputType.FT, MaterialProduct.InputType.EACH],
+        )
+        self.assertEqual(
+            list(self.mine.lengths.order_by('length_ft').values_list('length_ft', flat=True)),
+            [Decimal('10'), Decimal('18')],
+        )
+        self.assertEqual(self.mine.default_length_ft, Decimal('18'))
+
+    def test_edit_rejects_default_length_not_in_stock_lengths(self):
+        response = self.client.post(
+            reverse('estimating:material-update', args=[self.mine.pk]),
+            {
+                'name': 'My Plate Stock',
+                'category': MaterialProduct.Category.DIMENSIONAL,
+                'species': '',
+                'grade': '',
+                'nominal_dimension': '',
+                'supported_input_types': [MaterialProduct.InputType.FT],
+                'input_type': MaterialProduct.InputType.FT,
+                'quantity_per_box': '',
+                'lengths': '8, 16',
+                'default_length': '12',
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Default length must be one of the listed stock lengths.')
+
+    def test_user_can_delete_unused_owned_material(self):
+        response = self.client.post(
+            reverse('estimating:material-delete', args=[self.mine.pk]),
+            follow=True,
+        )
+        self.assertRedirects(response, reverse('estimating:library'))
+        self.assertFalse(MaterialProduct.objects.filter(pk=self.mine.pk).exists())
+        self.assertContains(response, 'My Plate Stock')
+        self.assertContains(response, 'deleted.')
+
+    def test_delete_shows_message_when_material_is_in_use(self):
+        project = Project.objects.create(account=self.user.account, name='Delete Guard Project')
+        estimate = Estimate.objects.create(project=project)
+        LineItem.objects.create(
+            estimate=estimate, material=self.mine, role='Plate', quantity=2, source=LineItem.Source.MANUAL,
+        )
+        response = self.client.post(
+            reverse('estimating:material-delete', args=[self.mine.pk]),
+            follow=True,
+        )
+        self.assertRedirects(response, reverse('estimating:library'))
+        self.assertTrue(MaterialProduct.objects.filter(pk=self.mine.pk).exists())
+        self.assertContains(response, 'My Plate Stock')
+        self.assertContains(response, 'because it is still used')
+
+    def test_user_cannot_edit_or_delete_stock_or_foreign_materials(self):
+        self.assertEqual(
+            self.client.get(reverse('estimating:material-update', args=[self.stock.pk])).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(reverse('estimating:material-update', args=[self.foreign.pk])).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(reverse('estimating:material-delete', args=[self.stock.pk])).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(reverse('estimating:material-delete', args=[self.foreign.pk])).status_code,
+            404,
+        )
 
 
 class AssemblyQuickEditTests(TestCase):

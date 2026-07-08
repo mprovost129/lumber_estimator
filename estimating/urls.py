@@ -6,6 +6,10 @@ app_name = 'estimating'
 
 urlpatterns = [
     path('library/', views.LibraryView.as_view(), name='library'),
+    path('library/materials/new/', views.MaterialCreateView.as_view(), name='material-create'),
+    path('library/materials/<int:pk>/edit/', views.MaterialUpdateView.as_view(), name='material-update'),
+    path('library/materials/<int:pk>/price/', views.MaterialPriceUpdateView.as_view(), name='material-price'),
+    path('library/materials/<int:pk>/delete/', views.MaterialDeleteView.as_view(), name='material-delete'),
     path('library/formulas/new/', views.FormulaCreateView.as_view(), name='formula-create'),
     path('library/assemblies/new/', views.AssemblyCreateView.as_view(), name='assembly-create'),
     path('library/materials/import/', views.MaterialImportView.as_view(), name='material-import'),

@@ -10,7 +10,7 @@
     <nav class="mkt-nav-links">
         <a href="{% url 'core:pricing' %}">Pricing</a>
         <a href="{% url 'login' %}">Log in</a>
-        <a class="btn btn-primary btn-sm" href="{% url 'login' %}">Get started</a>
+        <a class="btn btn-primary btn-sm" href="{% url 'accounts:signup' %}">Get started</a>
     </nav>
 </header>
 
@@ -22,7 +22,7 @@
         with a supplier-ready material list. No spreadsheets, no scale ruler, no re-counting studs.
     </p>
     <div class="mkt-cta-row">
-        <a class="btn btn-primary btn-lg" href="{% url 'login' %}"><i class="bi bi-lightning-charge"></i> Start a takeoff</a>
+        <a class="btn btn-primary btn-lg" href="{% url 'accounts:signup' %}"><i class="bi bi-lightning-charge"></i> Start a takeoff</a>
         <a class="btn btn-light btn-lg" href="{% url 'core:pricing' %}">See pricing</a>
     </div>
     <p class="mkt-subnote">Free to trace. Pay only when you export.</p>
@@ -60,7 +60,7 @@
 
 <section class="mkt-final">
     <h2 class="mkt-h2">Your next bid, measured once</h2>
-    <a class="btn btn-primary btn-lg" href="{% url 'login' %}"><i class="bi bi-lightning-charge"></i> Get started free</a>
+    <a class="btn btn-primary btn-lg" href="{% url 'accounts:signup' %}"><i class="bi bi-lightning-charge"></i> Get started free</a>
 </section>
 
 <footer class="mkt-foot">

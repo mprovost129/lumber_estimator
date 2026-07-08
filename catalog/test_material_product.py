@@ -27,6 +27,10 @@ class MaterialProductSlugTests(TestCase):
 
 
 class MaterialProductInputTypeTests(TestCase):
+    def test_supported_input_types_default_to_primary_input_type(self):
+        product = MaterialProduct.objects.create(name='Default Support', input_type=MaterialProduct.InputType.EACH)
+        self.assertEqual(product.normalized_supported_input_types(), [MaterialProduct.InputType.EACH])
+
     def test_box_requires_quantity_per_box(self):
         product = MaterialProduct(name='Framing Nails', input_type=MaterialProduct.InputType.BOX)
         with self.assertRaises(ValidationError):
@@ -35,6 +39,15 @@ class MaterialProductInputTypeTests(TestCase):
     def test_non_box_rejects_quantity_per_box(self):
         product = MaterialProduct(
             name='Framing Nails', input_type=MaterialProduct.InputType.EACH, quantity_per_box=100,
+        )
+        with self.assertRaises(ValidationError):
+            product.full_clean()
+
+    def test_default_input_type_must_be_supported(self):
+        product = MaterialProduct(
+            name='Split Mode Material',
+            input_type=MaterialProduct.InputType.EACH,
+            supported_input_types=[MaterialProduct.InputType.FT],
         )
         with self.assertRaises(ValidationError):
             product.full_clean()
@@ -77,6 +90,26 @@ class MaterialProductInputTypeTests(TestCase):
         MaterialLength.objects.create(product=product, length_ft=16, is_default=True)
         MaterialLength.objects.create(product=product, length_ft=24)
         self.assertEqual(product.default_length_ft, 16)
+
+    def test_material_can_support_ft_without_ft_being_default_input_type(self):
+        product = MaterialProduct.objects.create(
+            name='Multi Mode Joist',
+            input_type=MaterialProduct.InputType.EACH,
+            supported_input_types=[MaterialProduct.InputType.EACH, MaterialProduct.InputType.FT],
+        )
+        MaterialLength.objects.create(product=product, length_ft=12, is_default=True)
+        MaterialLength.objects.create(product=product, length_ft=16)
+        self.assertEqual(product.default_length_ft, 12)
+        self.assertEqual(product.stock_length_for(13), 16)
+
+    def test_material_can_support_box_without_box_being_default_input_type(self):
+        product = MaterialProduct.objects.create(
+            name='Multi Mode Fasteners',
+            input_type=MaterialProduct.InputType.EACH,
+            supported_input_types=[MaterialProduct.InputType.EACH, MaterialProduct.InputType.BOX],
+            quantity_per_box=100,
+        )
+        self.assertEqual(product.boxes_needed(101), 2)
 
     def test_default_length_ft_raises_when_no_default_set(self):
         product = MaterialProduct.objects.create(name='Test No Default', input_type=MaterialProduct.InputType.FT)

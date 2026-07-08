@@ -11,7 +11,7 @@
     <nav class="mkt-nav-links">
         <a href="{% url 'core:pricing' %}">Pricing</a>
         <a href="{% url 'login' %}">Log in</a>
-        <a class="btn btn-primary btn-sm" href="{% url 'login' %}">Get started</a>
+        <a class="btn btn-primary btn-sm" href="{% url 'accounts:signup' %}">Get started</a>
     </nav>
 </header>
 {% endif %}
@@ -31,7 +31,7 @@
             <li><i class="bi bi-check-lg"></i> Full material and assembly library</li>
             <li><i class="bi bi-check-lg"></i> Live on-screen material list</li>
         </ul>
-        <a class="btn btn-light w-100" href="{% url 'login' %}">Start free</a>
+        <a class="btn btn-light w-100" href="{% url 'accounts:signup' %}">Start free</a>
     </div>
 
     {% if unlock %}
@@ -65,7 +65,7 @@
             <button type="submit" class="btn btn-primary w-100" {% if not plan.enabled %}disabled title="Checkout is not configured yet"{% endif %}>Subscribe</button>
         </form>
         {% else %}
-        <a class="btn btn-primary w-100" href="{% url 'login' %}">Sign in to subscribe</a>
+        <a class="btn btn-primary w-100" href="{% url 'accounts:signup' %}">Sign up to subscribe</a>
         {% endif %}
     </div>
     {% endfor %}

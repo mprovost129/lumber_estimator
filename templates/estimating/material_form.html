@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+
+{% block title %}{% if created %}New Material{% else %}Edit Material{% endif %}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="{% url 'estimating:library' %}">&larr; Back to library</a>
+    <h1 class="h2 mt-2">{% if created %}New material{% else %}Edit material{% endif %}</h1>
+    <p class="text-muted">Manage your private library items, including box counts and stock lengths.</p>
+</div>
+
+<form method="post" class="card" id="material-form">
+    {% csrf_token %}
+    <div class="card-body">
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3">
+        {% for field in form %}
+            <div class="{% if field.name == 'supported_input_types' or field.name == 'lengths' %}col-12{% elif field.name == 'default_length' or field.name == 'quantity_per_box' %}col-md-4{% else %}col-md-6{% endif %}" data-material-field="{{ field.name }}">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {% if field.name == 'supported_input_types' %}
+                <div class="d-flex flex-wrap gap-3 mt-1">
+                    {{ field }}
+                </div>
+                {% else %}
+                {{ field }}
+                {% endif %}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+    <div class="card-footer d-flex justify-content-end gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'estimating:library' %}">Cancel</a>
+        <button class="btn btn-primary" type="submit">{% if created %}Create material{% else %}Save material{% endif %}</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var form = document.getElementById('material-form');
+    if (!form) { return; }
+
+    var inputType = document.getElementById('id_input_type');
+    var supportedInputs = form.querySelectorAll('input[name="supported_input_types"]');
+    var lengthsWrap = form.querySelector('[data-material-field="lengths"]');
+    var defaultWrap = form.querySelector('[data-material-field="default_length"]');
+    var boxWrap = form.querySelector('[data-material-field="quantity_per_box"]');
+
+    function isSupported(value) {
+        return Array.prototype.some.call(supportedInputs, function (input) {
+            return input.checked && input.value === value;
+        });
+    }
+
+    function syncDefaultOptions() {
+        var hasSelectedDefault = false;
+        Array.prototype.forEach.call(inputType.options, function (option) {
+            var enabled = isSupported(option.value);
+            option.disabled = !enabled;
+            if (enabled && option.value === inputType.value) {
+                hasSelectedDefault = true;
+            }
+        });
+        if (!hasSelectedDefault) {
+            var fallback = Array.prototype.find.call(inputType.options, function (option) {
+                return !option.disabled;
+            });
+            if (fallback) {
+                inputType.value = fallback.value;
+            }
+        }
+    }
+
+    function toggleFields() {
+        syncDefaultOptions();
+        var isFeet = isSupported('ft');
+        var isBox = isSupported('box');
+        if (lengthsWrap) { lengthsWrap.style.display = isFeet ? '' : 'none'; }
+        if (defaultWrap) { defaultWrap.style.display = isFeet ? '' : 'none'; }
+        if (boxWrap) { boxWrap.style.display = isBox ? '' : 'none'; }
+    }
+
+    Array.prototype.forEach.call(supportedInputs, function (input) {
+        input.addEventListener('change', toggleFields);
+    });
+    toggleFields();
+})();
+</script>
+{% endblock %}

@@ -10,21 +10,27 @@ document.addEventListener('DOMContentLoaded', function () {
     var TRACE_CREATE_URL = root.dataset.traceCreateUrl;
     var TRACE_UPDATE_URL_BASE = root.dataset.traceUpdateUrlBase;
     var TRACE_DELETE_URL_BASE = root.dataset.traceDeleteUrlBase;
+    var TRACE_BATCH_UPDATE_URL = root.dataset.traceBatchUpdateUrl;
+    var TRACE_BATCH_DELETE_URL = root.dataset.traceBatchDeleteUrl;
     var WALL_DETAIL_URL_BASE = root.dataset.wallDetailUrlBase;
     var CALIBRATE_URL = root.dataset.calibrateUrl;
     var PRESETS_URL = root.dataset.presetsUrl;
+    var PRESET_FAVORITE_URL_BASE = root.dataset.presetFavoriteUrlBase;
     var MATERIAL_SUMMARY_URL = root.dataset.materialSummaryUrl;
+    var PROJECT_ID = root.dataset.projectId;
     var PAGE_ID = root.dataset.pageId;
     var isCalibrated = root.dataset.isCalibrated === 'true';
+    var scalePixelsPerFoot = parseFloat(root.dataset.scalePixelsPerFoot) || null;
     var defaultStudSpacing = parseInt(root.dataset.defaultStudSpacing, 10) || 16;
     var defaultWallHeight = parseFloat(root.dataset.defaultWallHeight) || 109.125;
+    var TOOLBAR_SELECTOR = '#tool-toolbar';
 
     // Drawing tools that create traces. Calibrate is handled separately.
     var TOOLS = {
         line: {
             label: 'Draw Wall', color: '#0d6efd', activeColor: '#198754',
             settingsFields: ['stud-spacing', 'wall-height', 'plate-counts', 'wall-layers'], minPoints: 2, maxPoints: 2,
-            hint: 'Click the start and end of the wall.',
+            hint: 'Click the start and end of the wall. Snaps to linework, endpoints, and square angles; hold Shift for free angles.',
         },
         area: {
             label: 'Draw Area Assembly', color: '#6f42c1', activeColor: '#198754',
@@ -34,7 +40,7 @@ document.addEventListener('DOMContentLoaded', function () {
         polyline: {
             label: 'Draw Polyline / Custom Assembly', color: '#20c997', activeColor: '#198754',
             settingsFields: ['closed'], minPoints: 2, maxPoints: null,
-            hint: 'Click each corner. Press Enter, double-click, or Escape to finish (keeps what you\'ve drawn).',
+            hint: 'Click each corner (snaps to linework, endpoints, and square angles; Shift for free angles, Backspace removes the last point). Enter or double-click finishes.',
         },
         count: {
             label: 'Count', color: '#fd7e14', activeColor: '#198754',
@@ -44,7 +50,12 @@ document.addEventListener('DOMContentLoaded', function () {
         opening: {
             label: 'Draw Opening', color: '#dc3545', activeColor: '#198754',
             settingsFields: ['opening-type', 'opening-size', 'stud-spacing'], minPoints: 2, maxPoints: 2,
-            hint: 'Click both sides of the window or door opening, preferably crossing the wall line.',
+            hint: 'One click on a wall places the opening at the Width setting, centered where you click. Or click both sides to size it by hand.',
+        },
+        measure: {
+            label: 'Measure / Verify', color: '#6c757d', activeColor: '#6c757d',
+            settingsFields: [], minPoints: 2, maxPoints: 2,
+            hint: 'Click two points to verify a dimension. Snaps to linework and endpoints. Nothing is saved to the plan or estimate.',
         },
     };
 
@@ -53,12 +64,15 @@ document.addEventListener('DOMContentLoaded', function () {
     var calibratePanel = document.getElementById('calibrate-panel');
     var toolSettingsPanel = document.getElementById('tool-settings-panel');
     var traceInspectorPanel = document.getElementById('trace-inspector-panel');
+    var bulkSelectionPanel = document.getElementById('bulk-selection-panel');
     var calibrationStatus = document.getElementById('calibration-status');
     var toolHint = document.getElementById('tool-hint');
     var toolPanelTitle = document.getElementById('tool-panel-title');
     var lastMeasurement = document.getElementById('last-measurement');
     var dismissOnboardingTipButton = document.getElementById('dismiss-onboarding-tip');
     var headerCalibrateButton = document.getElementById('header-calibrate-tool');
+    var prevPageButton = document.getElementById('prev-page-button');
+    var nextPageButton = document.getElementById('next-page-button');
     var scalePresetSelect = document.getElementById('scale-preset-select');
     var applyScalePresetButton = document.getElementById('apply-scale-preset');
 
@@ -72,16 +86,20 @@ document.addEventListener('DOMContentLoaded', function () {
     var closedInput = document.getElementById('closed-input');
     var presetSelect = document.getElementById('preset-select');
     var presetNameInput = document.getElementById('preset-name-input');
+    var presetFavoriteButton = document.getElementById('preset-favorite-toggle');
     var toolMemoryStatus = document.getElementById('tool-memory-status');
     var toolMemoryToggleButton = document.getElementById('tool-memory-toggle');
     var toolMemoryClearButton = document.getElementById('tool-memory-clear');
     var deleteButton = document.getElementById('delete-selected');
+    var materialControlsTrigger = document.getElementById('material-controls-trigger');
     var materialPageScopeButton = document.getElementById('material-page-scope');
     var materialFocusLinkedButton = document.getElementById('material-focus-linked');
     var materialSelectedOnlyButton = document.getElementById('material-selected-only');
     var materialCategoryOnlyButton = document.getElementById('material-category-only');
     var materialPrevLinkedButton = document.getElementById('material-prev-linked');
     var materialNextLinkedButton = document.getElementById('material-next-linked');
+    var materialApplyToolSetupButton = document.getElementById('material-apply-tool-setup');
+    var materialDeleteLinkedButton = document.getElementById('material-delete-linked');
     var materialClearLinkedButton = document.getElementById('material-clear-linked');
     var materialListStatus = document.getElementById('material-list-status');
     var selectionSummary = document.getElementById('selection-summary');
@@ -91,6 +109,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var inspectorTitle = document.getElementById('inspector-title');
     var inspectorMeasurement = document.getElementById('inspector-measurement');
+    var inspectorConfidenceStatus = document.getElementById('inspector-confidence-status');
+    var inspectorConfidenceText = document.getElementById('inspector-confidence-text');
     var inspectorMaterialSelect = document.getElementById('inspector-material-select');
     var inspectorAssemblySelect = document.getElementById('inspector-assembly-select');
     var inspectorParentWallWrap = document.getElementById('inspector-parent-wall-wrap');
@@ -98,9 +118,23 @@ document.addEventListener('DOMContentLoaded', function () {
     var inspectorColorInput = document.getElementById('inspector-color-input');
     var inspectorSettingsWrap = document.getElementById('inspector-settings');
     var inspectorSaveStatus = document.getElementById('inspector-save-status');
+    var useTraceForNewButton = document.getElementById('use-trace-for-new');
+    var duplicateInspectedButton = document.getElementById('duplicate-inspected-trace');
+    var selectSimilarInspectedButton = document.getElementById('select-similar-inspected-trace');
     var saveTraceChangesButton = document.getElementById('save-trace-changes');
     var deleteInspectedButton = document.getElementById('delete-inspected-trace');
     var viewWallElevationButton = document.getElementById('view-wall-elevation');
+    var bulkSelectionTitle = document.getElementById('bulk-selection-title');
+    var bulkSelectionSummary = document.getElementById('bulk-selection-summary');
+    var bulkMaterialToggle = document.getElementById('bulk-material-toggle');
+    var bulkMaterialSelect = document.getElementById('bulk-material-select');
+    var bulkAssemblyWrap = document.getElementById('bulk-assembly-wrap');
+    var bulkAssemblyToggle = document.getElementById('bulk-assembly-toggle');
+    var bulkAssemblySelect = document.getElementById('bulk-assembly-select');
+    var bulkColorToggle = document.getElementById('bulk-color-toggle');
+    var bulkColorInput = document.getElementById('bulk-color-input');
+    var bulkApplyButton = document.getElementById('bulk-apply-button');
+    var bulkDeleteButton = document.getElementById('bulk-delete-button');
     var wallElevationBackdrop = document.getElementById('wall-elevation-backdrop');
     var wallElevationModal = document.getElementById('wall-elevation-modal');
     var wallElevationMeta = document.getElementById('wall-elevation-meta');
@@ -120,6 +154,13 @@ document.addEventListener('DOMContentLoaded', function () {
     var wallDrag = null;
     var wallPersistTimer = null;
     var closeWallElevationButton = document.getElementById('close-wall-elevation');
+
+    // Pure geometry/format helpers live in viewer-helpers.js (loaded first),
+    // shared with the node test suite in js_tests/.
+    var viewerHelpers = window.LumberViewerHelpers;
+    var formatFeetInches = viewerHelpers.formatFeetInches;
+    var parseTraceIds = viewerHelpers.parseTraceIds;
+    var projectPointToSegment = viewerHelpers.projectPointToSegment;
 
     var initialTraces = JSON.parse(document.getElementById('traces-data').textContent);
     var materialsData = JSON.parse(document.getElementById('materials-data').textContent);
@@ -150,6 +191,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var inspectorSyncing = false;
     var tracePersistTimer = null;
     var tracePersistNonce = 0;
+    var pendingPageHandoff = null;
 
     showPanel('none');
 
@@ -336,6 +378,22 @@ document.addEventListener('DOMContentLoaded', function () {
         clearLinkedSelection();
     });
 
+    materialApplyToolSetupButton.addEventListener('click', function () {
+        applyCurrentToolSetupToLinkedTraces();
+    });
+
+    materialDeleteLinkedButton.addEventListener('click', function () {
+        deleteLinkedTraces();
+    });
+
+    bulkApplyButton.addEventListener('click', function () {
+        applyBulkSelectionChanges();
+    });
+
+    bulkDeleteButton.addEventListener('click', function () {
+        deleteLinkedTraces();
+    });
+
     undoDeleteTraceButton.addEventListener('click', function () {
         undoLastDeletedTrace();
     });
@@ -505,7 +563,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // whenever a raw tool button is used instead.
     var activeSemanticKey = null;
 
-    document.querySelectorAll('#tool-sidebar .tool-btn[data-tool]').forEach(function (button) {
+    document.querySelectorAll(TOOLBAR_SELECTOR + ' .tool-btn[data-tool]').forEach(function (button) {
         button.addEventListener('click', function () {
             var tool = button.dataset.tool;
             var wasActive = activeTool === tool && button.classList.contains('active');
@@ -522,7 +580,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    document.querySelectorAll('#tool-sidebar [data-semantic]').forEach(function (button) {
+    document.querySelectorAll(TOOLBAR_SELECTOR + ' [data-semantic]').forEach(function (button) {
         button.addEventListener('click', function () {
             var config = SEMANTIC_TOOLS[button.dataset.semantic];
             if (!config) {
@@ -570,7 +628,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Arming one on an uncalibrated page redirects to the calibrate tool
     // instead of letting the user draw into a server error; the requested
     // tool is remembered and re-armed automatically once the scale is set.
-    var MEASURING_TOOLS = ['line', 'area', 'polyline', 'opening'];
+    var MEASURING_TOOLS = ['line', 'area', 'polyline', 'opening', 'measure'];
     var pendingToolActivation = null;
 
     function activateTool(tool, variantFilter, variantLabel, sourceButton, settingsFieldsOverride) {
@@ -584,7 +642,7 @@ document.addEventListener('DOMContentLoaded', function () {
             variantFilter = null;
             variantLabel = null;
             settingsFieldsOverride = null;
-            sourceButton = headerCalibrateButton || document.querySelector('#tool-sidebar .tool-btn[data-tool="calibrate"]');
+            sourceButton = headerCalibrateButton || document.querySelector(TOOLBAR_SELECTOR + ' .tool-btn[data-tool="calibrate"]');
         }
         // Any activation (guarded redirect, direct tool pick, or deactivate)
         // replaces the pending re-arm, so switching tools or hitting Escape
@@ -597,7 +655,7 @@ document.addEventListener('DOMContentLoaded', function () {
         activeTool = tool;
         activeVariantFilter = variantFilter || null;
 
-        document.querySelectorAll('.tool-btn, #tool-sidebar .dropdown-item').forEach(function (button) {
+        document.querySelectorAll(TOOLBAR_SELECTOR + ' .tool-btn, ' + TOOLBAR_SELECTOR + ' .dropdown-item, .viewer-page-tools .tool-btn').forEach(function (button) {
             button.classList.remove('active');
         });
         if (sourceButton) {
@@ -625,7 +683,11 @@ document.addEventListener('DOMContentLoaded', function () {
         canvas.discardActiveObject();
         canvas.requestRenderAll();
 
-        if (tool && TOOLS[tool]) {
+        if (tool === 'measure') {
+            toolHint.textContent = TOOLS.measure.hint;
+            updateToolMemoryUi(null, null, null);
+            showPanel('none');
+        } else if (tool && TOOLS[tool]) {
             configureToolPanel(tool, variantLabel, settingsFieldsOverride);
             showPanel('tool-settings');
         } else if (tool === 'calibrate') {
@@ -732,15 +794,32 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function populatePresetOptions(toolType) {
         presetSelect.innerHTML = '<option value="">-- load a preset --</option>';
-        Object.keys(presetsById).forEach(function (id) {
-            var preset = presetsById[id];
-            if (preset.tool_type === toolType) {
-                var option = document.createElement('option');
-                option.value = preset.id;
-                option.textContent = preset.name;
-                presetSelect.appendChild(option);
+        // Object.keys() on numeric-string ids always iterates in ascending
+        // numeric order regardless of insertion order, so favorites need an
+        // explicit sort rather than relying on dict iteration.
+        var matches = Object.keys(presetsById)
+            .map(function (id) { return presetsById[id]; })
+            .filter(function (preset) { return preset.tool_type === toolType; });
+        matches.sort(function (a, b) {
+            if (Boolean(a.is_favorite) !== Boolean(b.is_favorite)) {
+                return a.is_favorite ? -1 : 1;
             }
+            return a.name.localeCompare(b.name);
         });
+        matches.forEach(function (preset) {
+            var option = document.createElement('option');
+            option.value = preset.id;
+            option.textContent = (preset.is_favorite ? '★ ' : '') + preset.name;
+            presetSelect.appendChild(option);
+        });
+        updatePresetFavoriteButton();
+    }
+
+    function updatePresetFavoriteButton() {
+        var preset = presetsById[presetSelect.value];
+        presetFavoriteButton.disabled = !preset;
+        var icon = presetFavoriteButton.querySelector('i');
+        icon.className = preset && preset.is_favorite ? 'bi bi-star-fill' : 'bi bi-star';
     }
 
     function collectWallSettings(byId) {
@@ -776,6 +855,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (tool === 'opening') {
             return {
                 opening_type: byId('opening-type-select').value || 'window',
+                rough_width_in: parseFloat(byId('rough-width-input').value) || null,
                 sill_height_in: parseInt(byId('sill-height-input').value, 10) || null,
                 rough_height_in: parseInt(byId('rough-height-input').value, 10) || null,
                 header_depth_in: parseFloat(byId('header-depth-input').value) || null,
@@ -894,6 +974,7 @@ document.addEventListener('DOMContentLoaded', function () {
         setValue('spacing-input', settings.spacing_in);
         setValue('direction-select', settings.member_direction);
         setValue('opening-type-select', settings.opening_type);
+        setValue('rough-width-input', settings.rough_width_in);
         setValue('sill-height-input', settings.sill_height_in);
         setValue('rough-height-input', settings.rough_height_in);
         setValue('header-depth-input', settings.header_depth_in);
@@ -1006,6 +1087,148 @@ document.addEventListener('DOMContentLoaded', function () {
         updateToolMemoryUi(activeTool, activeVariantFilter, activeSemanticKey);
     });
 
+    // ---------------------------------------------------- drawing assists
+    // Four click-savers for the measuring tools (line / polyline / opening /
+    // measure):
+    //   1. Endpoint snap: land exactly on a nearby existing trace endpoint.
+    //   2. Segment snap: land on nearby traced linework, not just endpoints.
+    //   3. Ortho snap: within a few degrees of square (45-degree steps) the
+    //      segment locks to the exact angle. Hold Shift to draw free angles.
+    //   4. A live length readout follows the cursor while drawing.
+    var SNAP_SCREEN_PX = 12;
+    var ORTHO_TOLERANCE_RAD = 8 * Math.PI / 180;
+    var SNAPPING_TOOLS = ['line', 'polyline', 'opening', 'measure'];
+
+    function snapRadiusCanvasPx() {
+        return SNAP_SCREEN_PX / (canvas.getZoom() || 1);
+    }
+
+    function endpointSnapCandidates() {
+        var points = [];
+        canvas.getObjects().forEach(function (obj) {
+            if (!obj.traceId || obj.visible === false) {
+                return;
+            }
+            if (SNAPPING_TOOLS.indexOf(obj.traceToolType) === -1) {
+                return;
+            }
+            var geometry = obj.traceGeometry || [];
+            if (geometry.length >= 2) {
+                points.push(geometry[0]);
+                points.push(geometry[geometry.length - 1]);
+            }
+        });
+        if (pendingPoints.length > 2) {
+            points.push(pendingPoints[0]);
+        }
+        return points;
+    }
+
+    function snapToEndpoint(pointer) {
+        return viewerHelpers.nearestPointWithin(
+            endpointSnapCandidates(), pointer, snapRadiusCanvasPx()
+        );
+    }
+
+    function snapToSegment(pointer) {
+        var geometries = [];
+        canvas.getObjects().forEach(function (obj) {
+            if (!obj.traceId || obj.visible === false) {
+                return;
+            }
+            if (SNAPPING_TOOLS.indexOf(obj.traceToolType) === -1) {
+                return;
+            }
+            geometries.push(obj.traceGeometry || []);
+        });
+        var projection = viewerHelpers.nearestSegmentProjection(geometries, pointer, snapRadiusCanvasPx());
+        return projection ? { x: projection.point.x, y: projection.point.y } : null;
+    }
+
+    function snapToOrtho(previous, pointer) {
+        return viewerHelpers.snapToOrtho(previous, pointer, ORTHO_TOLERANCE_RAD);
+    }
+
+    function applyDrawingSnaps(pointer, domEvent) {
+        if (SNAPPING_TOOLS.indexOf(activeTool) === -1) {
+            return pointer;
+        }
+        if (domEvent && domEvent.shiftKey) {
+            return pointer;
+        }
+        var endpoint = snapToEndpoint(pointer);
+        if (endpoint) {
+            return endpoint;
+        }
+        var segment = snapToSegment(pointer);
+        if (segment) {
+            return segment;
+        }
+        if (pendingPoints.length > 0) {
+            return snapToOrtho(pendingPoints[pendingPoints.length - 1], pointer);
+        }
+        return pointer;
+    }
+
+    // ---- live length readout ----
+    var measureReadout = document.createElement('div');
+    measureReadout.id = 'draw-measure-readout';
+    measureReadout.hidden = true;
+    canvasWrapEl.appendChild(measureReadout);
+
+    function updateMeasureReadout(pointer, domEvent) {
+        var measuring = isCalibrated && scalePixelsPerFoot
+            && SNAPPING_TOOLS.indexOf(activeTool) !== -1 && pendingPoints.length > 0;
+        if (!measuring) {
+            measureReadout.hidden = true;
+            return;
+        }
+        var previous = pendingPoints[pendingPoints.length - 1];
+        var distPx = Math.hypot(pointer.x - previous.x, pointer.y - previous.y);
+        measureReadout.textContent = formatFeetInches(distPx / scalePixelsPerFoot);
+        var rect = canvasWrapEl.getBoundingClientRect();
+        measureReadout.style.left = (domEvent.clientX - rect.left + canvasWrapEl.scrollLeft + 16) + 'px';
+        measureReadout.style.top = (domEvent.clientY - rect.top + canvasWrapEl.scrollTop + 16) + 'px';
+        measureReadout.hidden = false;
+    }
+
+    // ---- one-click opening placement ----
+    function nearestWallSegment(pointer, maxDist) {
+        var geometries = [];
+        canvas.getObjects().forEach(function (obj) {
+            if (!obj.traceId || obj.visible === false) {
+                return;
+            }
+            if (obj.traceToolType !== 'line' && obj.traceToolType !== 'polyline') {
+                return;
+            }
+            geometries.push(obj.traceGeometry || []);
+        });
+        return viewerHelpers.nearestSegmentProjection(geometries, pointer, maxDist);
+    }
+
+    function tryPlaceOpeningAtClick(pointer) {
+        // One click on a wall = a full opening: centered at the click, aligned
+        // to the wall, sized by the Width (in) setting. Falls back to the
+        // classic two-click flow when uncalibrated, width is blank, or the
+        // click is not near a wall.
+        var widthInput = document.getElementById('rough-width-input');
+        var widthIn = widthInput ? parseFloat(widthInput.value) : NaN;
+        if (!scalePixelsPerFoot || !widthIn || widthIn <= 0) {
+            return false;
+        }
+        var segment = nearestWallSegment(pointer, snapRadiusCanvasPx() * 2);
+        if (!segment) {
+            return false;
+        }
+        var halfPx = (widthIn / 12) * scalePixelsPerFoot / 2;
+        finishTrace([
+            { x: segment.point.x - segment.ux * halfPx, y: segment.point.y - segment.uy * halfPx },
+            { x: segment.point.x + segment.ux * halfPx, y: segment.point.y + segment.uy * halfPx },
+        ]);
+        return true;
+    }
+
     // ---------------------------------------------------------------- drawing
 
     canvas.on('mouse:down', function (opt) {
@@ -1028,6 +1251,10 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         var config = TOOLS[activeTool];
+        if (activeTool === 'opening' && pendingPoints.length === 0 && tryPlaceOpeningAtClick(pointer)) {
+            return;
+        }
+        pointer = applyDrawingSnaps(pointer, opt.e);
         pendingPoints.push({ x: pointer.x, y: pointer.y });
         drawPendingMarkers();
 
@@ -1052,7 +1279,8 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!activeTool || pendingPoints.length === 0 || activeTool === 'count') {
             return;
         }
-        var pointer = canvas.getPointer(opt.e);
+        var pointer = applyDrawingSnaps(canvas.getPointer(opt.e), opt.e);
+        updateMeasureReadout(pointer, opt.e);
         var start = pendingPoints[0];
         removePreview();
         if (activeTool === 'area') {
@@ -1090,6 +1318,105 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    // ------------------------------------------------- context menu
+    // Right-click on a trace surfaces the handful of actions that already
+    // have buttons/shortcuts elsewhere (duplicate, select similar, apply the
+    // armed tool setup, delete), directly under the cursor.
+    var traceContextMenu = document.getElementById('trace-context-menu');
+    var contextMenuTarget = null;
+
+    function hideTraceContextMenu() {
+        traceContextMenu.style.display = 'none';
+        contextMenuTarget = null;
+    }
+
+    function selectSimilarTraces(obj) {
+        var matches = canvas.getObjects().filter(function (candidate) {
+            return candidate.traceId
+                && candidate.traceToolType === obj.traceToolType
+                && String(candidate.traceMaterialId || '') === String(obj.traceMaterialId || '');
+        }).map(function (candidate) { return candidate.traceId; });
+        activateLinkedTraceIds(matches);
+    }
+
+    function showTraceContextMenu(clientX, clientY, target) {
+        contextMenuTarget = target;
+        var isGroupTarget = linkedTraceIds.length > 1 && linkedTraceIds.indexOf(target.traceId) !== -1;
+        var duplicateItem = traceContextMenu.querySelector('[data-action="duplicate"]');
+        var selectSimilarItem = traceContextMenu.querySelector('[data-action="select-similar"]');
+        var applyToolItem = traceContextMenu.querySelector('[data-action="apply-tool-setup"]');
+        var deleteItem = traceContextMenu.querySelector('[data-action="delete"]');
+        duplicateItem.style.display = isGroupTarget ? 'none' : '';
+        selectSimilarItem.style.display = isGroupTarget ? 'none' : '';
+        applyToolItem.style.display = canApplyToolSetupToLinked() ? '' : 'none';
+        deleteItem.textContent = isGroupTarget ? 'Delete linked (' + linkedTraceIds.length + ')' : 'Delete';
+
+        traceContextMenu.style.display = 'block';
+        // Clamp so the menu never renders past the viewport edge.
+        var menuRect = traceContextMenu.getBoundingClientRect();
+        var left = Math.min(clientX, window.innerWidth - menuRect.width - 8);
+        var top = Math.min(clientY, window.innerHeight - menuRect.height - 8);
+        traceContextMenu.style.left = Math.max(8, left) + 'px';
+        traceContextMenu.style.top = Math.max(8, top) + 'px';
+    }
+
+    canvas.upperCanvasEl.addEventListener('contextmenu', function (event) {
+        event.preventDefault();
+        // Tools stay armed between draws (persistent draw mode), so "a tool
+        // is active" is the normal state, not a reason to suppress the menu.
+        // Only an in-progress multi-point shape (mid-polyline, etc.) should
+        // block it, the same way Escape treats a pending shape specially.
+        if (pendingPoints.length > 0) {
+            return;
+        }
+        var target = canvas.findTarget(event, false);
+        if (!target || !target.traceId) {
+            hideTraceContextMenu();
+            return;
+        }
+        var currentSelectionIds = canvasSelectionTraceObjects(canvas.getActiveObject())
+            .map(function (obj) { return obj.traceId; });
+        if (currentSelectionIds.indexOf(target.traceId) === -1) {
+            selectTraceObject(target);
+        }
+        showTraceContextMenu(event.clientX, event.clientY, target);
+    });
+
+    document.addEventListener('click', function (event) {
+        if (traceContextMenu.style.display !== 'none' && !traceContextMenu.contains(event.target)) {
+            hideTraceContextMenu();
+        }
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            hideTraceContextMenu();
+        }
+    });
+
+    traceContextMenu.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-action]');
+        if (!button || !contextMenuTarget) {
+            return;
+        }
+        var action = button.dataset.action;
+        var target = contextMenuTarget;
+        var wasGroupTarget = linkedTraceIds.length > 1 && linkedTraceIds.indexOf(target.traceId) !== -1;
+        hideTraceContextMenu();
+        if (action === 'duplicate') {
+            duplicateTrace(target);
+        } else if (action === 'select-similar') {
+            selectSimilarTraces(target);
+        } else if (action === 'apply-tool-setup') {
+            applyCurrentToolSetupToLinkedTraces();
+        } else if (action === 'delete') {
+            if (wasGroupTarget) {
+                deleteLinkedTraces();
+            } else {
+                deleteTrace(target);
+            }
+        }
+    });
+
     // ------------------------------------------------- keyboard shortcuts
     // Single keys arm tools without mousing to the sidebar. Keys with several
     // variants cycle on repeat press (W: exterior -> interior bearing ->
@@ -1099,16 +1426,17 @@ document.addEventListener('DOMContentLoaded', function () {
     // handlers, so variant filters, default assemblies, and tool memory all
     // apply exactly as if clicked.
     var SHORTCUT_CYCLES = {
-        w: '#tool-sidebar [data-semantic="wall"]',
-        o: '#tool-sidebar [data-semantic="opening"]',
-        b: '#tool-sidebar [data-semantic="beam"]',
+        w: TOOLBAR_SELECTOR + ' [data-semantic="wall"]',
+        o: TOOLBAR_SELECTOR + ' [data-semantic="opening"]',
+        b: TOOLBAR_SELECTOR + ' [data-semantic="beam"]',
     };
     var SHORTCUT_SINGLES = {
-        j: '#tool-sidebar [data-semantic="joist"]',
-        c: '#tool-sidebar [data-semantic="column"]',
-        p: '#tool-sidebar [data-semantic="plate"]',
-        r: '#tool-sidebar [data-semantic="rim_board"]',
-        h: '#tool-sidebar .tool-btn[data-tool="hand"]',
+        m: '#measure-tool-button',
+        j: TOOLBAR_SELECTOR + ' [data-semantic="joist"]',
+        c: TOOLBAR_SELECTOR + ' [data-semantic="column"]',
+        p: TOOLBAR_SELECTOR + ' [data-semantic="plate"]',
+        r: TOOLBAR_SELECTOR + ' [data-semantic="rim_board"]',
+        h: TOOLBAR_SELECTOR + ' .tool-btn[data-tool="hand"]',
     };
 
     function isTypingTarget(target) {
@@ -1144,11 +1472,192 @@ document.addEventListener('DOMContentLoaded', function () {
         return false;
     }
 
+    function toolSourceButton(tool, semanticKey, variantFilter) {
+        if (semanticKey === 'wall' && variantFilter && variantFilter.wallSubtype) {
+            return document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="wall"][data-wall-subtype="' + variantFilter.wallSubtype + '"]');
+        }
+        if (semanticKey === 'opening' && variantFilter && variantFilter.openingKind) {
+            return document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="opening"][data-opening-kind="' + variantFilter.openingKind + '"]');
+        }
+        if (semanticKey === 'beam' && variantFilter && variantFilter.beamType) {
+            return document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="beam"][data-beam-type="' + variantFilter.beamType + '"]');
+        }
+        if (semanticKey) {
+            return document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="' + semanticKey + '"]');
+        }
+        if (tool === 'calibrate') {
+            return headerCalibrateButton;
+        }
+        return document.querySelector(TOOLBAR_SELECTOR + ' .tool-btn[data-tool="' + tool + '"]');
+    }
+
+    function toolSettingsFieldsForHandoff(tool, semanticKey) {
+        if (semanticKey && SEMANTIC_TOOLS[semanticKey]) {
+            return SEMANTIC_TOOLS[semanticKey].settingsFields;
+        }
+        return null;
+    }
+
+    function pageHandoffKey() {
+        return PROJECT_ID ? ('plan-viewer-page-handoff:' + PROJECT_ID) : null;
+    }
+
+    function currentToolHandoffState() {
+        if (!activeTool) {
+            return null;
+        }
+        return {
+            tool: activeTool,
+            semanticKey: activeSemanticKey || null,
+            variantFilter: activeVariantFilter || null,
+            variantLabel: activeSemanticKey && SEMANTIC_TOOLS[activeSemanticKey]
+                ? SEMANTIC_TOOLS[activeSemanticKey].label
+                : null,
+            settings: TOOLS[activeTool] ? collectSettings(activeTool, '') : {},
+            assemblyId: assemblySelect.value || '',
+            materialId: materialSelect.value || '',
+            color: colorInput.value || '',
+        };
+    }
+
+    function storePageHandoffState() {
+        var key = pageHandoffKey();
+        var payload = currentToolHandoffState();
+        if (!key) {
+            return;
+        }
+        try {
+            if (payload) {
+                window.sessionStorage.setItem(key, JSON.stringify(payload));
+            } else {
+                window.sessionStorage.removeItem(key);
+            }
+        } catch (e) { /* storage unavailable */ }
+    }
+
+    function clearPageHandoffState() {
+        var key = pageHandoffKey();
+        if (!key) {
+            return;
+        }
+        try {
+            window.sessionStorage.removeItem(key);
+        } catch (e) { /* storage unavailable */ }
+    }
+
+    function loadPageHandoffState() {
+        var key = pageHandoffKey();
+        if (!key) {
+            return null;
+        }
+        try {
+            var raw = window.sessionStorage.getItem(key);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function applyHandoffSetupValues(payload) {
+        if (!payload) {
+            return;
+        }
+        applyToolSettings(payload.settings || {});
+        if (payload.color) {
+            colorInput.value = payload.color;
+        }
+        if (optionExists(materialSelect, payload.materialId)) {
+            materialSelect.value = payload.materialId || '';
+        }
+        if (optionExists(assemblySelect, payload.assemblyId)) {
+            assemblySelect.value = payload.assemblyId || '';
+        }
+        if (activeTool && TOOLS[activeTool]) {
+            saveToolMemory(activeTool, activeVariantFilter, activeSemanticKey);
+            updateToolMemoryUi(activeTool, activeVariantFilter, activeSemanticKey);
+        }
+        lastMeasurement.textContent = 'Continued your last tool setup on this page.';
+    }
+
+    function applyPageHandoffState() {
+        var payload = loadPageHandoffState();
+        if (!payload || !payload.tool) {
+            return;
+        }
+        pendingPageHandoff = null;
+        activeSemanticKey = payload.semanticKey || null;
+        activateTool(
+            payload.tool,
+            payload.variantFilter || null,
+            payload.variantLabel || null,
+            toolSourceButton(payload.tool, payload.semanticKey, payload.variantFilter),
+            toolSettingsFieldsForHandoff(payload.tool, payload.semanticKey)
+        );
+        if (activeTool === 'calibrate') {
+            pendingPageHandoff = payload;
+            return;
+        }
+        applyHandoffSetupValues(payload);
+        clearPageHandoffState();
+    }
+
+    function navigateToSiblingPage(direction) {
+        var current = document.querySelector('#page-strip .page-strip-item.is-current');
+        if (!current) {
+            return false;
+        }
+        var sibling = direction < 0 ? current.previousElementSibling : current.nextElementSibling;
+        if (!sibling || !sibling.href) {
+            return false;
+        }
+        storePageHandoffState();
+        window.location.href = sibling.href;
+        return true;
+    }
+
+    function syncPageNavButtons() {
+        var current = document.querySelector('#page-strip .page-strip-item.is-current');
+        if (!current) {
+            if (prevPageButton) {
+                prevPageButton.disabled = true;
+            }
+            if (nextPageButton) {
+                nextPageButton.disabled = true;
+            }
+            return;
+        }
+        if (prevPageButton) {
+            prevPageButton.disabled = !current.previousElementSibling;
+        }
+        if (nextPageButton) {
+            nextPageButton.disabled = !current.nextElementSibling;
+        }
+    }
+
     document.addEventListener('keydown', function (event) {
+        // Backspace while drawing: undo the last vertex instead of losing the
+        // whole in-progress shape (a misclick no longer costs the wall).
+        if (event.key === 'Backspace' && !isTypingTarget(event.target) && pendingPoints.length > 0) {
+            event.preventDefault();
+            pendingPoints.pop();
+            var lastMarker = pendingMarkers.pop();
+            if (lastMarker) {
+                canvas.remove(lastMarker);
+            }
+            removePreview();
+            measureReadout.hidden = true;
+            canvas.requestRenderAll();
+            return;
+        }
         // Tool shortcuts: plain single keys only. Never while typing in a
         // field, and never when a modifier is held (Ctrl+R, Cmd+W, etc. stay
         // browser shortcuts).
         if (!isTypingTarget(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            if (event.key.toLowerCase() === 'd' && selectedTrace) {
+                event.preventDefault();
+                duplicateTrace(selectedTrace);
+                return;
+            }
             if (handleToolShortcut(event.key.toLowerCase())) {
                 event.preventDefault();
                 return;
@@ -1159,19 +1668,21 @@ document.addEventListener('DOMContentLoaded', function () {
             // already placed) wherever that's meaningful - e.g. a multi-
             // segment wall polyline - falling back to a full cancel when
             // there's nothing yet worth keeping (below the tool's minimum
-            // point count), or - if nothing at all is pending - deactivating
-            // the tool entirely so existing traces become selectable again.
-            // Semantic tools (Wall/Plate/etc.) have no other "none" button,
-            // so this is the only keyboard way out of an armed tool once
-            // you're done drawing with it.
-            if (!finishMultiPointIfPending()) {
-                if (pendingPoints.length > 0) {
-                    resetPending();
-                } else if (linkedTraceIds.length) {
-                    clearLinkedSelection();
-                } else if (activeTool) {
-                    activateTool(null);
+            // point count). Leaving a draw tool drops into Hand mode so the
+            // user can pan immediately without another click.
+            if (finishMultiPointIfPending()) {
+                if (activeTool && activeTool !== 'hand') {
+                    switchToHandTool();
                 }
+            } else if (pendingPoints.length > 0) {
+                resetPending();
+                if (activeTool && activeTool !== 'hand') {
+                    switchToHandTool();
+                }
+            } else if (activeTool) {
+                switchToHandTool();
+            } else if (linkedTraceIds.length) {
+                clearLinkedSelection();
             }
         } else if (!isTypingTarget(event.target) && event.key === '[') {
             if (linkedTraceIds.length > 1) {
@@ -1183,10 +1694,44 @@ document.addEventListener('DOMContentLoaded', function () {
                 event.preventDefault();
                 cycleLinkedTrace(1);
             }
+        } else if (!isTypingTarget(event.target) && event.key === 'PageUp') {
+            if (navigateToSiblingPage(-1)) {
+                event.preventDefault();
+            }
+        } else if (!isTypingTarget(event.target) && event.key === 'PageDown') {
+            if (navigateToSiblingPage(1)) {
+                event.preventDefault();
+            }
         } else if (event.key === 'Enter') {
             finishMultiPointIfPending();
         }
     });
+
+    if (prevPageButton) {
+        prevPageButton.addEventListener('click', function () {
+            if (ZOOM_STORAGE_KEY) {
+                window.sessionStorage.removeItem(ZOOM_STORAGE_KEY);
+            }
+            navigateToSiblingPage(-1);
+        });
+    }
+
+    if (nextPageButton) {
+        nextPageButton.addEventListener('click', function () {
+            if (ZOOM_STORAGE_KEY) {
+                window.sessionStorage.removeItem(ZOOM_STORAGE_KEY);
+            }
+            navigateToSiblingPage(1);
+        });
+    }
+
+    document.querySelectorAll('#page-strip .page-strip-item').forEach(function (link) {
+        link.addEventListener('click', function () {
+            storePageHandoffState();
+        });
+    });
+
+    syncPageNavButtons();
 
     function finishMultiPointIfPending() {
         if (activeTool === 'count' && pendingPoints.length >= 1) {
@@ -1205,10 +1750,30 @@ document.addEventListener('DOMContentLoaded', function () {
         return false;
     }
 
+    function switchToHandTool() {
+        activeSemanticKey = null;
+        activateTool('hand', null, null, toolSourceButton('hand'));
+    }
+
     function finishTrace(geometry) {
         var tool = activeTool;
         resetPending();
+        if (tool === 'measure') {
+            showMeasuredDimension(geometry);
+            return;
+        }
         createTrace(tool, geometry);
+    }
+
+    function showMeasuredDimension(geometry) {
+        if (!geometry || geometry.length < 2 || !scalePixelsPerFoot) {
+            return;
+        }
+        var start = geometry[0];
+        var end = geometry[geometry.length - 1];
+        var feet = Math.hypot(end.x - start.x, end.y - start.y) / scalePixelsPerFoot;
+        var decimalFeet = (Math.round(feet * 100) / 100).toFixed(2);
+        lastMeasurement.textContent = 'Verified: ' + formatFeetInches(feet) + ' (' + decimalFeet + ' ft)';
     }
 
     var pendingMarkers = [];
@@ -1217,7 +1782,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var point = pendingPoints[pendingPoints.length - 1];
         var marker = new fabric.Circle({
             left: point.x - 4, top: point.y - 4, radius: 4,
-            fill: activeTool === 'count' ? '#fd7e14' : colorInput.value,
+            fill: activeTool === 'count' ? '#fd7e14' : (activeTool === 'measure' ? '#6c757d' : colorInput.value),
             selectable: false, evented: false,
         });
         pendingMarkers.push(marker);
@@ -1227,6 +1792,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function resetPending() {
         pendingPoints = [];
+        measureReadout.hidden = true;
         removePreview();
         pendingMarkers.forEach(function (marker) { canvas.remove(marker); });
         pendingMarkers = [];
@@ -1244,8 +1810,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var calibratePoints = [];
 
-    function onCalibrated() {
+    function onCalibrated(data) {
         isCalibrated = true;
+        if (data && data.scale_pixels_per_foot) {
+            scalePixelsPerFoot = parseFloat(data.scale_pixels_per_foot) || scalePixelsPerFoot;
+        }
         calibrationStatus.textContent = 'Calibrated';
         calibrationStatus.classList.remove('badge-status-archived');
         calibrationStatus.classList.add('badge-status-active');
@@ -1260,9 +1829,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 pending.tool, pending.variantFilter, pending.variantLabel,
                 pending.sourceButton, pending.settingsFieldsOverride,
             );
+            if (pendingPageHandoff && activeTool && TOOLS[activeTool]) {
+                applyHandoffSetupValues(pendingPageHandoff);
+                pendingPageHandoff = null;
+                clearPageHandoffState();
+            }
             return;
         }
         activateTool(null);
+        if (pendingPageHandoff) {
+            pendingPageHandoff = null;
+            clearPageHandoffState();
+        }
     }
 
     function handleCalibrateClick(pointer) {
@@ -1314,11 +1892,93 @@ document.addEventListener('DOMContentLoaded', function () {
     canvas.on('selection:updated', onTraceSelected);
     canvas.on('selection:cleared', onTraceDeselected);
 
-    function onTraceSelected() {
-        var obj = canvas.getActiveObject();
-        if (!obj || !obj.traceId) {
+    function canvasSelectionTraceObjects(obj) {
+        if (!obj) {
+            return [];
+        }
+        if (obj.traceId) {
+            return [obj];
+        }
+        if (typeof obj.getObjects === 'function') {
+            return obj.getObjects().filter(function (item) {
+                return item && item.traceId;
+            });
+        }
+        return [];
+    }
+
+    function traceTypeSummary(objects) {
+        var labels = {};
+        objects.forEach(function (obj) {
+            var label = ((TOOLS[obj.traceToolType] || TOOLS.line).label || 'Trace');
+            labels[label] = true;
+        });
+        return Object.keys(labels);
+    }
+
+    function renderBulkSelectionPanel(objects) {
+        if (!objects || !objects.length) {
             return;
         }
+        var count = objects.length;
+        var labels = traceTypeSummary(objects);
+        var sameType = labels.length === 1;
+        bulkSelectionTitle.textContent = 'Bulk edit ' + count + ' trace' + (count === 1 ? '' : 's');
+        bulkSelectionSummary.textContent = sameType
+            ? ('All selected traces are ' + labels[0].toLowerCase() + ' elements.')
+            : ('Mixed trace types selected: ' + labels.join(', ') + '.');
+
+        var materialIds = objects.map(function (obj) { return String(obj.traceMaterialId || ''); });
+        var uniqueMaterialIds = Array.from(new Set(materialIds));
+        bulkMaterialSelect.value = uniqueMaterialIds.length === 1 ? uniqueMaterialIds[0] : '';
+        bulkMaterialToggle.checked = uniqueMaterialIds.length === 1 && Boolean(uniqueMaterialIds[0]);
+
+        var colors = objects.map(function (obj) {
+            return obj.traceColor || ((TOOLS[obj.traceToolType] || TOOLS.line).color);
+        });
+        var uniqueColors = Array.from(new Set(colors));
+        bulkColorInput.value = uniqueColors[0] || '#0d6efd';
+        bulkColorToggle.checked = uniqueColors.length === 1;
+
+        if (sameType) {
+            var first = objects[0];
+            bulkAssemblyWrap.style.display = '';
+            populateAssemblyOptions(bulkAssemblySelect, first.traceToolType, first.traceSettings || {});
+            var assemblyIds = objects.map(function (obj) { return String(obj.traceAssemblyId || ''); });
+            var uniqueAssemblyIds = Array.from(new Set(assemblyIds));
+            bulkAssemblySelect.value = uniqueAssemblyIds.length === 1 ? uniqueAssemblyIds[0] : '';
+            bulkAssemblyToggle.checked = uniqueAssemblyIds.length === 1 && Boolean(uniqueAssemblyIds[0]);
+        } else {
+            bulkAssemblyWrap.style.display = 'none';
+            bulkAssemblyToggle.checked = false;
+            bulkAssemblySelect.innerHTML = '';
+        }
+    }
+
+    function onTraceSelected() {
+        var obj = canvas.getActiveObject();
+        var selectedObjects = canvasSelectionTraceObjects(obj);
+        if (!selectedObjects.length) {
+            return;
+        }
+        if (selectedObjects.length > 1) {
+            activateTool(null);
+            selectedTrace = null;
+            if (tracePersistTimer) {
+                clearTimeout(tracePersistTimer);
+                tracePersistTimer = null;
+            }
+            linkedTraceIds = selectedObjects.map(function (item) { return item.traceId; });
+            activeMaterialSummary = null;
+            activeLinkedTraceIndex = 0;
+            syncMaterialListSelection();
+            scrollMaterialRowIntoView(linkedTraceIds);
+            updateMaterialToolbarState();
+            renderBulkSelectionPanel(selectedObjects);
+            showPanel('bulk');
+            return;
+        }
+        obj = selectedObjects[0];
         activateTool(null);
         selectedTrace = obj;
         if (tracePersistTimer) {
@@ -1329,6 +1989,9 @@ document.addEventListener('DOMContentLoaded', function () {
         inspectorSyncing = true;
         inspectorTitle.textContent = 'Selected ' + config.label;
         inspectorMeasurement.textContent = obj.traceMeasurement || '';
+        var confidenceReason = incompleteReason(obj);
+        inspectorConfidenceStatus.style.display = confidenceReason ? '' : 'none';
+        inspectorConfidenceText.textContent = confidenceReason;
         inspectorMaterialSelect.value = obj.traceMaterialId || '';
         populateAssemblyOptions(inspectorAssemblySelect, obj.traceToolType, obj.traceSettings || {});
         inspectorAssemblySelect.value = obj.traceAssemblyId || '';
@@ -1528,11 +2191,32 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     deleteButton.addEventListener('click', function () {
-        deleteTrace(canvas.getActiveObject());
+        var activeObj = canvas.getActiveObject();
+        var selectedObjects = canvasSelectionTraceObjects(activeObj);
+        if (selectedObjects.length > 1) {
+            linkedTraceIds = selectedObjects.map(function (obj) { return obj.traceId; });
+            deleteLinkedTraces();
+            return;
+        }
+        deleteTrace(activeObj);
     });
 
     deleteInspectedButton.addEventListener('click', function () {
         deleteTrace(selectedTrace);
+    });
+
+    useTraceForNewButton.addEventListener('click', function () {
+        useTraceForNewTraces(selectedTrace);
+    });
+
+    duplicateInspectedButton.addEventListener('click', function () {
+        duplicateTrace(selectedTrace);
+    });
+
+    selectSimilarInspectedButton.addEventListener('click', function () {
+        if (selectedTrace) {
+            selectSimilarTraces(selectedTrace);
+        }
     });
 
     viewWallElevationButton.addEventListener('click', function () {
@@ -1634,7 +2318,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 selectedTrace.traceSettings = trace.settings || {};
                 selectedTrace.traceMeasurement = trace.measurement_display || selectedTrace.traceMeasurement;
                 restyleTrace(selectedTrace);
+                updateIncompleteMarker(selectedTrace);
+                canvas.requestRenderAll();
                 inspectorMeasurement.textContent = selectedTrace.traceMeasurement || '';
+                var confidenceReason = incompleteReason(selectedTrace);
+                inspectorConfidenceStatus.style.display = confidenceReason ? '' : 'none';
+                inspectorConfidenceText.textContent = confidenceReason;
                 updateInspectorSaveStatus('Saved.');
                 refreshMaterialList();
             })
@@ -1667,18 +2356,19 @@ document.addEventListener('DOMContentLoaded', function () {
         onTraceSelected();
     }
 
-    function parseTraceIds(rawValue) {
-        if (!rawValue) {
-            return [];
-        }
-        return rawValue.split(',').map(function (value) {
-            return parseInt(value, 10);
-        }).filter(function (value) {
-            return !isNaN(value);
+    function nearestWallSegment(pointer, maxDist) {
+        var geometries = [];
+        canvas.getObjects().forEach(function (obj) {
+            if (!obj.traceId || obj.visible === false) {
+                return;
+            }
+            if (obj.traceToolType !== 'line' && obj.traceToolType !== 'polyline') {
+                return;
+            }
+            geometries.push(obj.traceGeometry || []);
         });
-    }
-
-    function getTraceObjectsByIds(traceIds) {
+        return viewerHelpers.nearestSegmentProjection(geometries, pointer, maxDist);
+    }    function getTraceObjectsByIds(traceIds) {
         return canvas.getObjects().filter(function (obj) {
             return obj.traceId && traceIds.indexOf(obj.traceId) !== -1;
         });
@@ -1701,29 +2391,292 @@ document.addEventListener('DOMContentLoaded', function () {
         };
     }
 
-    function updateUndoDeleteUi() {
-        if (!deleteUndoBanner || !deleteUndoText) {
-            return;
-        }
-        if (!lastDeletedTraceSnapshot) {
-            deleteUndoBanner.style.display = 'none';
-            return;
-        }
-        deleteUndoText.textContent = lastDeletedTraceSnapshot.label + ' deleted. Undo restores it to this page.';
-        deleteUndoBanner.style.display = '';
+    function linkedTraceObjects() {
+        return getTraceObjectsByIds(linkedTraceIds);
     }
 
-    function undoLastDeletedTrace() {
-        if (!lastDeletedTraceSnapshot) {
+    function canApplyToolSetupToLinked() {
+        if (!activeTool || !TOOLS[activeTool] || !linkedTraceIds.length) {
+            return false;
+        }
+        var matches = linkedTraceObjects();
+        if (!matches.length) {
+            return false;
+        }
+        return matches.every(function (obj) {
+            return obj.traceToolType === activeTool;
+        });
+    }
+
+    function persistTraceUpdate(obj, payload) {
+        return fetch(TRACE_UPDATE_URL_BASE.replace('0', obj.traceId), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify(payload),
+        })
+            .then(handleJsonResponse)
+            .then(function (trace) {
+                obj.traceMaterialId = trace.material_id;
+                obj.traceAssemblyId = trace.assembly_id;
+                obj.traceParentWallId = trace.parent_wall_id;
+                obj.traceColor = trace.color;
+                obj.traceSettings = trace.settings || {};
+                obj.traceMeasurement = trace.measurement_display || obj.traceMeasurement;
+                restyleTrace(obj);
+                updateIncompleteMarker(obj);
+                canvas.requestRenderAll();
+                return trace;
+            });
+    }
+
+    function applyTracePayloadToObject(obj, trace) {
+        obj.traceMaterialId = trace.material_id;
+        obj.traceAssemblyId = trace.assembly_id;
+        obj.traceParentWallId = trace.parent_wall_id;
+        obj.traceColor = trace.color;
+        obj.traceSettings = trace.settings || {};
+        obj.traceMeasurement = trace.measurement_display || obj.traceMeasurement;
+        restyleTrace(obj);
+        updateIncompleteMarker(obj);
+    }
+
+    function persistTraceBatchUpdate(traceIds, payload) {
+        return fetch(TRACE_BATCH_UPDATE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify(Object.assign({ trace_ids: traceIds }, payload)),
+        })
+            .then(handleJsonResponse)
+            .then(function (data) {
+                var tracesById = {};
+                (data.traces || []).forEach(function (trace) {
+                    tracesById[trace.id] = trace;
+                });
+                canvas.getObjects().forEach(function (obj) {
+                    if (obj.traceId && tracesById[obj.traceId]) {
+                        applyTracePayloadToObject(obj, tracesById[obj.traceId]);
+                    }
+                });
+                return data.traces || [];
+            });
+    }
+
+    function persistTraceBatchDelete(traceIds) {
+        return fetch(TRACE_BATCH_DELETE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
+            body: JSON.stringify({ trace_ids: traceIds }),
+        }).then(handleJsonResponse);
+    }
+
+    function applyCurrentToolSetupToLinkedTraces() {
+        if (!canApplyToolSetupToLinked()) {
             return;
         }
-        var snapshot = lastDeletedTraceSnapshot;
-        fetch(TRACE_CREATE_URL, {
+        var matches = linkedTraceObjects();
+        var settings = collectSettings(activeTool, '');
+        persistTraceBatchUpdate(linkedTraceIds.slice(), {
+            apply_material: true,
+            material_id: materialSelect.value || null,
+            apply_assembly: true,
+            assembly_id: assemblySelect.value || null,
+            apply_color: true,
+            color: colorInput.value,
+            apply_settings: true,
+            settings: settings,
+        })
+            .then(function () {
+                canvas.requestRenderAll();
+                refreshMaterialList();
+                lastMeasurement.textContent = 'Applied current tool setup to ' + matches.length + ' linked trace' + (matches.length === 1 ? '' : 's') + '.';
+            })
+            .catch(showError);
+    }
+
+    function applyBulkSelectionChanges() {
+        var matches = linkedTraceObjects();
+        if (!matches.length) {
+            return;
+        }
+        persistTraceBatchUpdate(linkedTraceIds.slice(), {
+            apply_material: bulkMaterialToggle.checked,
+            material_id: bulkMaterialSelect.value || null,
+            apply_assembly: bulkAssemblyWrap.style.display !== 'none' && bulkAssemblyToggle.checked,
+            assembly_id: bulkAssemblySelect.value || null,
+            apply_color: bulkColorToggle.checked,
+            color: bulkColorInput.value,
+            apply_settings: false,
+        })
+            .then(function () {
+                canvas.requestRenderAll();
+                refreshMaterialList();
+                renderBulkSelectionPanel(linkedTraceObjects());
+                lastMeasurement.textContent = 'Applied bulk changes to ' + matches.length + ' selected trace' + (matches.length === 1 ? '' : 's') + '.';
+            })
+            .catch(showError);
+    }
+
+    function assemblyById(assemblyId) {
+        if (!assemblyId) {
+            return null;
+        }
+        for (var i = 0; i < assembliesData.length; i += 1) {
+            if (String(assembliesData[i].id) === String(assemblyId)) {
+                return assembliesData[i];
+            }
+        }
+        return null;
+    }
+
+    function isWallLikeTrace(snapshot, assembly) {
+        var settings = snapshot.settings || {};
+        return Boolean(
+            (assembly && assembly.wall_subtype) ||
+            (snapshot.toolType === 'polyline' && settings.closed === false) ||
+            settings.wall_height_in || settings.top_plate_count || settings.bottom_plate_count
+        );
+    }
+
+    function inferTraceToolSetup(snapshot) {
+        var assembly = assemblyById(snapshot.assemblyId);
+        var settings = snapshot.settings || {};
+        var openingKind = (settings.opening_type || (assembly && assembly.opening_kind) || '').toLowerCase();
+        if (snapshot.toolType === 'opening' && (openingKind === 'window' || openingKind === 'door')) {
+            return {
+                tool: 'opening',
+                variantFilter: { openingKind: openingKind },
+                variantLabel: 'Opening',
+                sourceButton: document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="opening"][data-opening-kind="' + openingKind + '"]'),
+                semanticKey: 'opening',
+                settingsFieldsOverride: SEMANTIC_TOOLS.opening.settingsFields,
+            };
+        }
+        if ((snapshot.toolType === 'line' || snapshot.toolType === 'polyline') && assembly && assembly.beam_type) {
+            return {
+                tool: 'line',
+                variantFilter: { beamType: assembly.beam_type },
+                variantLabel: 'Beam',
+                sourceButton: document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="beam"][data-beam-type="' + assembly.beam_type + '"]'),
+                semanticKey: 'beam',
+                settingsFieldsOverride: SEMANTIC_TOOLS.beam.settingsFields,
+            };
+        }
+        if ((snapshot.toolType === 'line' || snapshot.toolType === 'polyline') && isWallLikeTrace(snapshot, assembly) && assembly && assembly.wall_subtype) {
+            return {
+                tool: 'polyline',
+                variantFilter: { wallSubtype: assembly.wall_subtype },
+                variantLabel: 'Wall',
+                sourceButton: document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="wall"][data-wall-subtype="' + assembly.wall_subtype + '"]'),
+                semanticKey: 'wall',
+                settingsFieldsOverride: SEMANTIC_TOOLS.wall.settingsFields,
+            };
+        }
+        if (snapshot.toolType === 'area' && assembly && ['floor_system', 'ceiling', 'roof'].indexOf(assembly.category) !== -1) {
+            return {
+                tool: 'area',
+                variantFilter: { categoryIn: ['floor_system', 'ceiling', 'roof'] },
+                variantLabel: 'Joist',
+                sourceButton: document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="joist"]'),
+                semanticKey: 'joist',
+                settingsFieldsOverride: SEMANTIC_TOOLS.joist.settingsFields,
+            };
+        }
+        if (snapshot.toolType === 'count' && assembly) {
+            return {
+                tool: 'count',
+                variantFilter: null,
+                variantLabel: 'Column',
+                sourceButton: document.querySelector(TOOLBAR_SELECTOR + ' [data-semantic="column"]'),
+                semanticKey: 'column',
+                settingsFieldsOverride: SEMANTIC_TOOLS.column.settingsFields,
+            };
+        }
+        return {
+            tool: snapshot.toolType,
+            variantFilter: null,
+            variantLabel: null,
+            sourceButton: document.querySelector(TOOLBAR_SELECTOR + ' .tool-btn[data-tool="' + snapshot.toolType + '"]'),
+            semanticKey: null,
+            settingsFieldsOverride: null,
+        };
+    }
+
+    function useTraceForNewTraces(obj) {
+        var snapshot = traceSnapshotFromObject(obj);
+        if (!snapshot) {
+            return;
+        }
+        var setup = inferTraceToolSetup(snapshot);
+        activeSemanticKey = setup.semanticKey || null;
+        activateTool(
+            setup.tool,
+            setup.variantFilter || null,
+            setup.variantLabel || null,
+            setup.sourceButton || null,
+            setup.settingsFieldsOverride || null
+        );
+        applyToolSettings(snapshot.settings || {});
+        if (snapshot.color) {
+            colorInput.value = snapshot.color;
+        }
+        if (optionExists(materialSelect, snapshot.materialId)) {
+            materialSelect.value = snapshot.materialId || '';
+        }
+        if (optionExists(assemblySelect, snapshot.assemblyId)) {
+            assemblySelect.value = snapshot.assemblyId || '';
+        }
+        if (activeTool && TOOLS[activeTool]) {
+            saveToolMemory(activeTool, activeVariantFilter, activeSemanticKey);
+            updateToolMemoryUi(activeTool, activeVariantFilter, activeSemanticKey);
+        }
+        lastMeasurement.textContent = 'Using selected ' + snapshot.label.toLowerCase() + ' setup for new traces.';
+    }
+
+    function clampPointToImage(point) {
+        if (!point) {
+            return point;
+        }
+        var clamped = { x: point.x, y: point.y };
+        if (imageNaturalWidth) {
+            clamped.x = Math.max(0, Math.min(imageNaturalWidth, clamped.x));
+        }
+        if (imageNaturalHeight) {
+            clamped.y = Math.max(0, Math.min(imageNaturalHeight, clamped.y));
+        }
+        return clamped;
+    }
+
+    function cloneGeometryWithOffset(geometry, offsetX, offsetY) {
+        return (geometry || []).map(function (point) {
+            return clampPointToImage({
+                x: Number(point.x || 0) + offsetX,
+                y: Number(point.y || 0) + offsetY,
+            });
+        });
+    }
+
+    function selectTraceObject(obj) {
+        if (!obj) {
+            return;
+        }
+        canvas.discardActiveObject();
+        canvas.setActiveObject(obj);
+        canvas.requestRenderAll();
+        scrollCanvasObjectsIntoView([obj]);
+        onTraceSelected();
+    }
+
+    function createTraceFromSnapshot(snapshot, options) {
+        if (!snapshot) {
+            return Promise.resolve(null);
+        }
+        var opts = options || {};
+        return fetch(TRACE_CREATE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
             body: JSON.stringify({
                 tool_type: snapshot.toolType,
-                geometry: snapshot.geometry,
+                geometry: opts.geometry || snapshot.geometry,
                 material_id: snapshot.materialId,
                 assembly_id: snapshot.assemblyId,
                 parent_wall_id: snapshot.parentWallId,
@@ -1733,8 +2686,59 @@ document.addEventListener('DOMContentLoaded', function () {
         })
             .then(handleJsonResponse)
             .then(function (trace) {
-                drawTrace(trace);
+                var obj = drawTrace(trace);
                 refreshMaterialList();
+                if (opts.selectCreated !== false) {
+                    selectTraceObject(obj);
+                }
+                return trace;
+            });
+    }
+
+    function duplicateTrace(obj) {
+        var snapshot = traceSnapshotFromObject(obj);
+        if (!snapshot) {
+            return;
+        }
+        createTraceFromSnapshot(snapshot, {
+            geometry: cloneGeometryWithOffset(snapshot.geometry, 24, 24),
+            selectCreated: true,
+        })
+            .then(function (trace) {
+                lastMeasurement.textContent = trace && trace.measurement_display
+                    ? ('Duplicated trace: ' + trace.measurement_display)
+                    : 'Duplicated selected trace.';
+            })
+            .catch(showError);
+    }
+
+    function updateUndoDeleteUi() {
+        if (!deleteUndoBanner || !deleteUndoText) {
+            return;
+        }
+        if (!lastDeletedTraceSnapshot) {
+            deleteUndoBanner.style.display = 'none';
+            return;
+        }
+        if (Array.isArray(lastDeletedTraceSnapshot)) {
+            deleteUndoText.textContent = lastDeletedTraceSnapshot.length + ' traces deleted. Undo restores them to this page.';
+        } else {
+            deleteUndoText.textContent = lastDeletedTraceSnapshot.label + ' deleted. Undo restores it to this page.';
+        }
+        deleteUndoBanner.style.display = '';
+    }
+
+    function undoLastDeletedTrace() {
+        if (!lastDeletedTraceSnapshot) {
+            return;
+        }
+        var snapshots = Array.isArray(lastDeletedTraceSnapshot)
+            ? lastDeletedTraceSnapshot.slice()
+            : [lastDeletedTraceSnapshot];
+        Promise.all(snapshots.map(function (snapshot) {
+            return createTraceFromSnapshot(snapshot, { selectCreated: false });
+        }))
+            .then(function () {
                 lastDeletedTraceSnapshot = null;
                 updateUndoDeleteUi();
             })
@@ -1759,7 +2763,8 @@ document.addEventListener('DOMContentLoaded', function () {
         linkedTraceIds = traceIds.slice();
         activeLinkedTraceIndex = 0;
         syncMaterialListSelection();
-        showPanel('none');
+        renderBulkSelectionPanel(matches);
+        showPanel('bulk');
         scrollMaterialRowIntoView(linkedTraceIds);
         scrollCanvasObjectsIntoView(matches);
         updateMaterialToolbarState();
@@ -1897,6 +2902,11 @@ document.addEventListener('DOMContentLoaded', function () {
     function updateMaterialToolbarState() {
         var hasLinked = linkedTraceIds.length > 0;
         var hasHover = hoveredTraceIds.length > 0;
+        var anyFilterActive = materialSummaryPageOnly || focusLinkedMode || materialSelectedOnly || materialCategoryOnly;
+        if (materialControlsTrigger) {
+            materialControlsTrigger.classList.toggle('btn-primary', anyFilterActive);
+            materialControlsTrigger.classList.toggle('btn-outline-secondary', !anyFilterActive);
+        }
         if (materialPageScopeButton) {
             materialPageScopeButton.textContent = 'This page only: ' + (materialSummaryPageOnly ? 'On' : 'Off');
             materialPageScopeButton.classList.toggle('btn-primary', materialSummaryPageOnly);
@@ -1926,6 +2936,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (materialNextLinkedButton) {
             materialNextLinkedButton.disabled = linkedTraceIds.length < 2;
         }
+        if (materialApplyToolSetupButton) {
+            materialApplyToolSetupButton.disabled = !canApplyToolSetupToLinked();
+        }
+        if (materialDeleteLinkedButton) {
+            materialDeleteLinkedButton.disabled = !hasLinked;
+        }
         if (materialClearLinkedButton) {
             materialClearLinkedButton.disabled = !hasLinked;
         }
@@ -1954,6 +2970,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     (linkedTraceIds.length > 1 ? ' • match ' + escapeHtml(String(activeLinkedTraceIndex + 1)) + ' of ' + escapeHtml(String(linkedTraceIds.length)) : '') +
                     (activeMaterialSummary.quantity ? ' • qty ' + escapeHtml(String(activeMaterialSummary.quantity)) : '') +
                     (focusLinkedMode ? ' • focus mode on' : '');
+            } else if (hasLinked) {
+                selectionSummary.textContent = linkedTraceIds.length + ' trace' + (linkedTraceIds.length === 1 ? '' : 's') + ' selected on the canvas.';
             } else if (selectedTrace) {
                 selectionSummary.innerHTML = '<strong>' + escapeHtml((TOOLS[selectedTrace.traceToolType] || TOOLS.line).label) + '</strong>' +
                     (selectedTrace.traceMeasurement ? ' • ' + escapeHtml(selectedTrace.traceMeasurement) : '') +
@@ -2572,6 +3590,7 @@ document.addEventListener('DOMContentLoaded', function () {
     presetSelect.addEventListener('change', function () {
         var preset = presetsById[presetSelect.value];
         if (!preset) {
+            updatePresetFavoriteButton();
             return;
         }
         materialSelect.value = preset.material_id || '';
@@ -2583,6 +3602,29 @@ document.addEventListener('DOMContentLoaded', function () {
         if (typeof settings.closed !== 'undefined') { closedInput.checked = settings.closed; }
         colorInput.value = preset.color || TOOLS[activeTool].color;
         populateAssemblyOptions(assemblySelect, activeTool, collectSettings(activeTool, ''));
+        if (optionExists(assemblySelect, preset.assembly_id)) {
+            assemblySelect.value = preset.assembly_id || '';
+        }
+        updatePresetFavoriteButton();
+    });
+
+    presetFavoriteButton.addEventListener('click', function () {
+        var preset = presetsById[presetSelect.value];
+        if (!preset) {
+            return;
+        }
+        fetch(PRESET_FAVORITE_URL_BASE.replace('0', preset.id), {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrftoken },
+        })
+            .then(handleJsonResponse)
+            .then(function (data) {
+                preset.is_favorite = data.is_favorite;
+                populatePresetOptions(activeTool);
+                presetSelect.value = preset.id;
+                updatePresetFavoriteButton();
+            })
+            .catch(showError);
     });
 
     closedInput.addEventListener('change', function () {
@@ -2603,6 +3645,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 name: name,
                 tool_type: activeTool,
                 material_id: materialSelect.value || null,
+                assembly_id: assemblySelect.value || null,
                 color: colorInput.value,
                 settings: collectSettings(activeTool, ''),
             }),
@@ -2612,6 +3655,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 preset.tool_type = preset.tool_type || activeTool;
                 presetsById[preset.id] = preset;
                 populatePresetOptions(activeTool);
+                presetSelect.value = preset.id;
+                updatePresetFavoriteButton();
                 presetNameInput.value = '';
             })
             .catch(showError);
@@ -2624,26 +3669,20 @@ document.addEventListener('DOMContentLoaded', function () {
         // by which point the user may have switched tools.
         var variantFilter = activeVariantFilter;
         var semanticKey = activeSemanticKey;
-        fetch(TRACE_CREATE_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
-            body: JSON.stringify({
-                tool_type: tool,
-                geometry: geometry,
-                material_id: materialSelect.value || null,
-                assembly_id: assemblySelect.value || null,
-                color: colorInput.value,
-                settings: collectSettings(tool, ''),
-            }),
+        createTraceFromSnapshot({
+            toolType: tool,
+            geometry: geometry,
+            materialId: materialSelect.value || null,
+            assemblyId: assemblySelect.value || null,
+            parentWallId: null,
+            color: colorInput.value,
+            settings: collectSettings(tool, ''),
         })
-            .then(handleJsonResponse)
             .then(function (trace) {
-                drawTrace(trace);
                 if (trace.measurement_display) {
                     lastMeasurement.textContent = 'Last trace: ' + trace.measurement_display;
                 }
                 saveToolMemory(tool, variantFilter, semanticKey);
-                refreshMaterialList();
             })
             .catch(showError);
     }
@@ -2659,6 +3698,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }).then(function (response) {
             if (response.ok) {
                 canvas.remove(obj);
+                removeIncompleteMarker(obj.traceId);
                 canvas.discardActiveObject();
                 canvas.requestRenderAll();
                 selectedTrace = null;
@@ -2670,6 +3710,42 @@ document.addEventListener('DOMContentLoaded', function () {
                 updateUndoDeleteUi();
             }
         });
+    }
+
+    function deleteLinkedTraces() {
+        var matches = linkedTraceObjects();
+        if (!matches.length) {
+            return;
+        }
+        lastDeletedTraceSnapshot = matches.map(traceSnapshotFromObject).filter(Boolean);
+        persistTraceBatchDelete(linkedTraceIds.slice())
+            .then(function () {
+                matches.forEach(function (obj) {
+                    canvas.remove(obj);
+                    removeIncompleteMarker(obj.traceId);
+                });
+            })
+            .then(function () {
+                canvas.discardActiveObject();
+                selectedTrace = null;
+                linkedTraceIds = [];
+                activeMaterialSummary = null;
+                activeLinkedTraceIndex = -1;
+                focusLinkedMode = false;
+                materialSelectedOnly = false;
+                materialCategoryOnly = false;
+                canvas.requestRenderAll();
+                refreshMaterialList();
+                updateUndoDeleteUi();
+                updateMaterialToolbarState();
+                showPanel(activeTool && TOOLS[activeTool] ? 'tool-settings' : 'none');
+                lastMeasurement.textContent = 'Deleted linked traces.';
+            })
+            .catch(function (error) {
+                lastDeletedTraceSnapshot = null;
+                updateUndoDeleteUi();
+                showError(error);
+            });
     }
 
     function drawTrace(trace) {
@@ -2684,7 +3760,70 @@ document.addEventListener('DOMContentLoaded', function () {
         obj.traceSettings = trace.settings || {};
         obj.traceMeasurement = trace.measurement_display || '';
         canvas.add(obj);
+        updateIncompleteMarker(obj);
         canvas.requestRenderAll();
+        return obj;
+    }
+
+    // ---------------------------------------------- confidence indicators
+    // A small "!" badge over any trace missing the info it needs to
+    // contribute to the material list, so incompleteness is visible without
+    // opening the inspector for every trace. Kept separate from the
+    // assembly-assigned green/default color (that signal already exists but
+    // doesn't say *why* a trace is incomplete).
+    var incompleteMarkers = {};
+
+    function traceIsIncomplete(obj) {
+        if (!obj.traceAssemblyId) {
+            return true;
+        }
+        if (obj.traceToolType === 'opening' && !obj.traceParentWallId) {
+            return true;
+        }
+        return false;
+    }
+
+    function incompleteReason(obj) {
+        if (!obj.traceAssemblyId) {
+            return 'No assembly assigned - this trace will not generate any materials.';
+        }
+        if (obj.traceToolType === 'opening' && !obj.traceParentWallId) {
+            return 'Not attached to a wall - header/king/jack sizing may not auto-resolve.';
+        }
+        return '';
+    }
+
+    function removeIncompleteMarker(traceId) {
+        var existing = incompleteMarkers[traceId];
+        if (existing) {
+            canvas.remove(existing);
+            delete incompleteMarkers[traceId];
+        }
+    }
+
+    function updateIncompleteMarker(obj) {
+        removeIncompleteMarker(obj.traceId);
+        if (!traceIsIncomplete(obj)) {
+            return;
+        }
+        var anchor = obj.traceGeometry && obj.traceGeometry[0];
+        if (!anchor) {
+            return;
+        }
+        var marker = new fabric.Group([
+            new fabric.Circle({
+                radius: 8, fill: '#fd7e14', stroke: '#ffffff', strokeWidth: 1.5,
+                originX: 'center', originY: 'center',
+            }),
+            new fabric.Text('!', {
+                fontSize: 12, fontWeight: 'bold', fill: '#ffffff', fontFamily: 'sans-serif',
+                originX: 'center', originY: 'center', top: -1,
+            }),
+        ], {
+            left: anchor.x, top: anchor.y, selectable: false, evented: false,
+        });
+        incompleteMarkers[obj.traceId] = marker;
+        canvas.add(marker);
     }
 
     function buildTraceObject(trace) {
@@ -2824,6 +3963,7 @@ document.addEventListener('DOMContentLoaded', function () {
             calibratePanel.style.display !== 'none' ||
             toolSettingsPanel.style.display !== 'none' ||
             traceInspectorPanel.style.display !== 'none' ||
+            bulkSelectionPanel.style.display !== 'none' ||
             Boolean(toolHint.textContent);
         toolPanelEl.style.display = anyVisible ? '' : 'none';
     }
@@ -2833,6 +3973,7 @@ document.addEventListener('DOMContentLoaded', function () {
         calibratePanel.style.display = name === 'calibrate' ? '' : 'none';
         toolSettingsPanel.style.display = name === 'tool-settings' ? '' : 'none';
         traceInspectorPanel.style.display = name === 'inspector' ? '' : 'none';
+        bulkSelectionPanel.style.display = name === 'bulk' ? '' : 'none';
         if (noSelectionPanel.style.display !== 'none') {
             scheduleOnboardingTipAutoDismiss();
         } else if (onboardingTipTimer) {
@@ -2864,4 +4005,5 @@ document.addEventListener('DOMContentLoaded', function () {
     studSpacingInput.value = defaultStudSpacing;
     spacingInput.value = defaultStudSpacing;
     wallHeightInput.value = defaultWallHeight;
+    applyPageHandoffState();
 });

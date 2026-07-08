@@ -35,6 +35,12 @@
         <span class="mat-stat-num">{{ totals.framing_bf|floatformat:0 }}</span>
         <span class="mat-stat-label">framing BF</span>
     </div>
+    {% if totals.has_pricing %}
+    <div class="mat-stat">
+        <span class="mat-stat-num">${{ totals.material_cost|floatformat:0 }}</span>
+        <span class="mat-stat-label">material cost</span>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 {% regroup order_list by category_label as category_groups %}

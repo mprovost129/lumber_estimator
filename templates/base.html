@@ -27,6 +27,16 @@
             {% endif %}
 
             <main class="app-content {% block main_class %}{% endblock %}">
+                {% if user.is_authenticated and not user.email_verified %}
+                <div class="verify-banner no-print">
+                    <i class="bi bi-envelope-exclamation"></i>
+                    <span>Verify your email to enable exports and subscriptions. Check your inbox for the link.</span>
+                    <form method="post" action="{% url 'accounts:resend-verification' %}">
+                        {% csrf_token %}
+                        <button type="submit" class="verify-banner-resend">Resend email</button>
+                    </form>
+                </div>
+                {% endif %}
                 {% if messages %}
                 <div class="messages">
                     {% for message in messages %}

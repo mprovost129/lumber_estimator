@@ -20,6 +20,7 @@ psycopg2-binary==2.9.11
 Pygments==2.20.0
 pymupdf==1.28.0
 pytest==9.0.2
+pytest-xdist==3.8.0
 pytest-django==4.12.0
 python-discovery==1.2.1
 python-dotenv==1.2.2
@@ -27,6 +28,7 @@ PyYAML==6.0.3
 redis==7.4.0
 ruff==0.15.9
 sqlparse==0.5.5
+django-storages[s3]==1.14.6
 openpyxl==3.1.5
 stripe~=13.0
 tzdata==2026.1

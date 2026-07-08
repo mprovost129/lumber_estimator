@@ -44,6 +44,7 @@ class MaterialImportTests(TestCase):
         self.assertEqual(hanger.account_id, self.user.account_id)
         self.assertEqual(hanger.category, 'connectors')
         self.assertEqual(hanger.input_type, 'each')
+        self.assertEqual(hanger.normalized_supported_input_types(), [MaterialProduct.InputType.EACH])
 
         lumber = MaterialProduct.objects.get(name='Yard 2x6 KD')
         # Label form of the category resolves to its key.
@@ -54,6 +55,7 @@ class MaterialImportTests(TestCase):
 
         screws = MaterialProduct.objects.get(name='Yard Screws')
         self.assertEqual(screws.quantity_per_box, 350)
+        self.assertEqual(screws.normalized_supported_input_types(), [MaterialProduct.InputType.BOX])
 
     def test_reimport_skips_existing_names(self):
         MaterialProduct.objects.create(

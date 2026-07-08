@@ -15,6 +15,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
+    email_verified_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='When the user confirmed this address via the emailed link. '
+                  'Signing in never requires it; Stripe checkout does.',
+    )
 
     objects = UserManager()
 
@@ -25,6 +30,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Meta:
         verbose_name = 'user'
         verbose_name_plural = 'users'
+
+    @property
+    def email_verified(self):
+        return self.email_verified_at is not None
 
     def get_full_name(self):
         return f'{self.first_name} {self.last_name}'.strip()

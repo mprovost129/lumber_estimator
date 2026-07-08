@@ -51,6 +51,19 @@ class FormulaLibraryViewTests(TestCase):
         self.assertContains(response, 'Line LF')
         self.assertContains(response, 'Area SF')
 
+    def test_library_does_not_crash_when_ft_material_has_no_default_length(self):
+        MaterialProduct.objects.create(
+            account=self.user.account,
+            name='E2E 2x6',
+            input_type=MaterialProduct.InputType.FT,
+        )
+
+        response = self.client.get(reverse('estimating:library'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'E2E 2x6')
+        self.assertContains(response, 'No default length set')
+
     def test_user_can_create_derived_formula(self):
         stock = Formula.objects.get(name='Line LF', account__isnull=True)
 

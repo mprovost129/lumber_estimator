@@ -1,12 +1,12 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ImproperlyConfigured
-from django.conf import settings
 from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 
 from projects.models import Estimate
 
@@ -45,8 +45,25 @@ class BillingOverviewView(LoginRequiredMixin, View):
         })
 
 
+def _require_verified_email(request):
+    """Stripe checkout requires a verified email: it keeps throwaway-address
+    tenants out of the payment flow and guarantees receipts and portal links
+    have somewhere real to go. Returns a redirect when unverified, else None.
+    Tracing and building material lists are never gated by this."""
+    if request.user.email_verified:
+        return None
+    messages.error(
+        request,
+        'Verify your email before purchasing. Use the banner link to resend the verification email.',
+    )
+    return redirect('billing:overview')
+
+
 class EstimateCheckoutSessionCreateView(LoginRequiredMixin, View):
     def post(self, request, pk):
+        blocked = _require_verified_email(request)
+        if blocked:
+            return blocked
         estimate = get_object_or_404(
             Estimate.objects.for_account(request.user.account).select_related('project'),
             pk=pk,
@@ -61,6 +78,9 @@ class EstimateCheckoutSessionCreateView(LoginRequiredMixin, View):
 
 class SubscriptionCheckoutSessionCreateView(LoginRequiredMixin, View):
     def post(self, request, slug):
+        blocked = _require_verified_email(request)
+        if blocked:
+            return blocked
         plan = subscription_plan_by_slug(slug)
         try:
             session = create_subscription_checkout_session(request, plan)

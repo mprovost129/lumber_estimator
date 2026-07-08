@@ -897,3 +897,92 @@ body.asm-drawer-open { overflow: hidden; }
 .mat-vis-toggle:hover { color: var(--primary); }
 .material-summary-row.is-material-hidden { opacity: 0.45; }
 .material-summary-row.is-material-hidden .mat-vis-toggle { color: var(--accent); }
+
+/* =============================================================================
+   Plan viewer: live drawing measurement readout
+   ============================================================================= */
+
+#draw-measure-readout {
+    position: absolute;
+    z-index: 20;
+    pointer-events: none;
+    background: var(--ink);
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    padding: 0.18rem 0.5rem;
+    border-radius: 6px;
+    box-shadow: var(--shadow-md);
+    white-space: nowrap;
+}
+
+/* =============================================================================
+   Email verification banner
+   ============================================================================= */
+
+.verify-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: #fef6e7;
+    border: 1px solid #f6dfb0;
+    color: #7c4a03;
+    border-radius: 10px;
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+    margin-bottom: 1.25rem;
+}
+.verify-banner .bi { font-size: 1.05rem; }
+.verify-banner form { margin-left: auto; }
+.verify-banner-resend {
+    border: 1px solid #eccb8b;
+    background: #fff;
+    color: #7c4a03;
+    font-weight: 600;
+    font-size: 0.82rem;
+    border-radius: 8px;
+    padding: 0.28rem 0.7rem;
+    cursor: pointer;
+}
+.verify-banner-resend:hover { background: #fdf1dc; }
+
+/* =============================================================================
+   Estimate order total (bid total)
+   ============================================================================= */
+
+.order-total {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    background: var(--primary-soft, #eef4ff);
+    border: 1px solid var(--primary-line, #d4e2ff);
+    border-radius: 10px;
+    padding: 0.35rem 0.85rem;
+}
+.order-total-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--primary-700, #1d4ed8);
+}
+.order-total-value {
+    font-size: 1.1rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text, #0e1a2b);
+}
+.order-total-row th {
+    border-top: 2px solid var(--border, #dfe4ec);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Library: inline material pricing */
+.tag-priced {
+    background: #e7f6ec;
+    border: 1px solid #b9e3c6;
+    color: #1a7f3c;
+}
+.mat-price-form { width: 100%; }
+.mat-price-form .input-group { max-width: 220px; }

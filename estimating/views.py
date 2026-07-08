@@ -7,6 +7,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
+from django.db.models import ProtectedError
 from django.db.models import Min, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse, JsonResponse
@@ -20,7 +21,7 @@ from accounts.models import Account
 from billing.services import estimate_output_access
 from projects.models import Estimate
 
-from .forms import AssemblyForm, CalculationRuleFormSet, FormulaForm, ManualLineItemForm
+from .forms import AssemblyForm, CalculationRuleFormSet, FormulaForm, ManualLineItemForm, MaterialForm
 from .models import Assembly, CalculationRule, Formula, LineItem
 
 CATEGORY_DEFAULT_ORDER = list(Assembly.Category.values)
@@ -71,7 +72,7 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
     rows = list(
         _summary_line_items(estimate, page_id=page_id, page_only=page_only)
         .order_by()
-        .values('effective_category', 'material__name', 'material__nominal_dimension',
+        .values('effective_category', 'material_id', 'material__name', 'material__nominal_dimension',
                 'material__species', 'material__grade', 'length_ft')
         .annotate(total_quantity=Sum('quantity'), min_role=Min('role'))
     )
@@ -87,6 +88,32 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
         row['category_label'] = CATEGORY_LABELS.get(row['effective_category'], row['effective_category'])
         row['role_label'] = row.get('min_role') or ''
     return rows
+
+
+def _attach_pricing(order_list, account):
+    """Attaches the account's unit cost and the extended cost (unit x quantity)
+    to each order row, and returns whether ANY row is priced. Rows without a
+    price get unit_cost=None and extended_cost=None, so the template shows a
+    dash and the estimate still reads as a clean material list. Never touches
+    the global catalog: prices are read from the account's MaterialPrice rows."""
+    from catalog.models import MaterialPrice
+
+    material_ids = {row['material_id'] for row in order_list if row.get('material_id')}
+    prices = dict(
+        MaterialPrice.objects
+        .filter(account=account, material_id__in=material_ids)
+        .values_list('material_id', 'unit_cost')
+    )
+    any_priced = False
+    for row in order_list:
+        unit_cost = prices.get(row.get('material_id'))
+        row['unit_cost'] = unit_cost
+        if unit_cost is not None:
+            row['extended_cost'] = unit_cost * (row['total_quantity'] or 0)
+            any_priced = True
+        else:
+            row['extended_cost'] = None
+    return any_priced
 
 
 def _attach_label_lengths(order_list):
@@ -188,6 +215,8 @@ def _summary_totals(order_list):
     parses as plain NxM and that carry a piece length."""
     total_pieces = 0
     framing_bf = Decimal('0')
+    material_cost = Decimal('0')
+    priced_rows = 0
     for row in order_list:
         quantity = row['total_quantity'] or 0
         total_pieces += quantity
@@ -197,10 +226,17 @@ def _summary_totals(order_list):
             thickness = Decimal(match.group(1))
             width = Decimal(match.group(2))
             framing_bf += thickness * width * Decimal(length_ft) / 12 * quantity
+        extended = row.get('extended_cost')
+        if extended is not None:
+            material_cost += extended
+            priced_rows += 1
     return {
         'total_pieces': total_pieces,
         'row_count': len(order_list),
         'framing_bf': framing_bf,
+        'material_cost': material_cost,
+        'priced_rows': priced_rows,
+        'has_pricing': priced_rows > 0,
     }
 
 
@@ -230,7 +266,10 @@ class EstimateDetailView(LoginRequiredMixin, DetailView):
             for category, items in itertools.groupby(line_items, key=lambda li: li.effective_category)
         ]
         context['grouped_line_items'] = grouped_line_items
-        context['order_list'] = _grouped_order_list(self.object)
+        order_list = _grouped_order_list(self.object)
+        _attach_pricing(order_list, account)
+        context['order_list'] = order_list
+        context['totals'] = _summary_totals(order_list)
         context['manual_form'] = ManualLineItemForm(account=account)
         context['estimate_access'] = estimate_output_access(self.object)
         return context
@@ -268,6 +307,7 @@ class EstimateMaterialSummaryView(LoginRequiredMixin, DetailView):
             page_only=page_only,
         )
         _attach_label_lengths(context['order_list'])
+        _attach_pricing(context['order_list'], self.object.project.account)
         context['totals'] = _summary_totals(context['order_list'])
         context['page_only'] = page_only
         context['current_page_id'] = current_page_id
@@ -291,17 +331,32 @@ class EstimateCsvExportView(LoginRequiredMixin, View):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
         writer = csv.writer(response)
-        writer.writerow(['System', 'Material', 'Dimension', 'Species/Grade', 'Length (ft)', 'Quantity'])
-        for row in _grouped_order_list(estimate):
+        order_list = _grouped_order_list(estimate)
+        has_pricing = _attach_pricing(order_list, estimate.project.account)
+        header = ['System', 'Material', 'Dimension', 'Species/Grade', 'Length (ft)', 'Quantity']
+        if has_pricing:
+            header += ['Unit Cost', 'Extended Cost']
+        writer.writerow(header)
+        for row in order_list:
             species_grade = ' '.join(part for part in (row['material__species'], row['material__grade']) if part)
-            writer.writerow([
+            line = [
                 row['category_label'],
                 row['material__name'],
                 row['material__nominal_dimension'],
                 species_grade,
                 row['length_ft'] or '',
                 row['total_quantity'],
-            ])
+            ]
+            if has_pricing:
+                line += [
+                    '' if row['unit_cost'] is None else f'{row["unit_cost"]:.2f}',
+                    '' if row['extended_cost'] is None else f'{row["extended_cost"]:.2f}',
+                ]
+            writer.writerow(line)
+        if has_pricing:
+            totals = _summary_totals(order_list)
+            writer.writerow([])
+            writer.writerow(['', '', '', '', '', 'Material total', '', f'{totals["material_cost"]:.2f}'])
         return response
 
 
@@ -326,7 +381,10 @@ class EstimatePrintView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['order_list'] = _grouped_order_list(self.object)
+        order_list = _grouped_order_list(self.object)
+        _attach_pricing(order_list, self.object.project.account)
+        context['order_list'] = order_list
+        context['totals'] = _summary_totals(order_list)
         context['estimate_access'] = estimate_output_access(self.object)
         return context
 
@@ -526,6 +584,7 @@ class MaterialImportView(LoginRequiredMixin, View):
                     species=(row.get('species') or '').strip(),
                     grade=(row.get('grade') or '').strip(),
                     nominal_dimension=(row.get('dimension') or '').strip(),
+                    supported_input_types=[input_type],
                     input_type=input_type, quantity_per_box=quantity_per_box,
                 )
                 for length in lengths:
@@ -588,6 +647,120 @@ class MaterialImportView(LoginRequiredMixin, View):
                     rows.append((index, row))
             return rows
         raise ValueError('Upload a .csv or .xlsx file.')
+
+
+class MaterialCreateView(LoginRequiredMixin, View):
+    template_name = 'estimating/material_form.html'
+
+    def get(self, request):
+        material = self._material_for_request(request)
+        return self._render(request, MaterialForm(instance=material, account=request.user.account), created=True)
+
+    def post(self, request):
+        material = self._material_for_request(request)
+        form = MaterialForm(request.POST, instance=material, account=request.user.account)
+        if form.is_valid():
+            material = form.save()
+            messages.success(request, f'Material "{material.name}" created.')
+            return redirect('estimating:library')
+        return self._render(request, form, created=True)
+
+    def _material_for_request(self, request):
+        from catalog.models import MaterialProduct
+
+        return MaterialProduct(account=request.user.account)
+
+    def _render(self, request, form, *, created):
+        return render(request, self.template_name, {
+            'form': form,
+            'material': form.instance,
+            'created': created,
+        })
+
+
+class MaterialUpdateView(LoginRequiredMixin, View):
+    template_name = 'estimating/material_form.html'
+
+    def get(self, request, pk):
+        material = self._get_material(request, pk)
+        return self._render(request, MaterialForm(instance=material, account=request.user.account), created=False)
+
+    def post(self, request, pk):
+        material = self._get_material(request, pk)
+        form = MaterialForm(request.POST, instance=material, account=request.user.account)
+        if form.is_valid():
+            material = form.save()
+            messages.success(request, f'Material "{material.name}" updated.')
+            return redirect('estimating:library')
+        return self._render(request, form, created=False)
+
+    def _get_material(self, request, pk):
+        from catalog.models import MaterialProduct
+
+        return get_object_or_404(
+            MaterialProduct.objects.filter(account=request.user.account).prefetch_related('lengths'),
+            pk=pk,
+        )
+
+    def _render(self, request, form, *, created):
+        return render(request, self.template_name, {
+            'form': form,
+            'material': form.instance,
+            'created': created,
+        })
+
+
+class MaterialPriceUpdateView(LoginRequiredMixin, View):
+    """Sets the account's private unit cost for any material the account can
+    see, including global stock SKUs. Global material attributes stay
+    read-only (edited only through MaterialUpdateView on owned copies), but
+    pricing is always account-scoped, so pricing a stock 2x6 or a seeded
+    hanger is safe and never mutates the shared catalog. A blank cost clears
+    the price."""
+
+    def post(self, request, pk):
+        from decimal import InvalidOperation
+
+        from catalog.models import MaterialPrice, MaterialProduct
+
+        material = get_object_or_404(MaterialProduct.objects.visible_to(request.user.account), pk=pk)
+        raw = (request.POST.get('unit_cost') or '').strip()
+        if not raw:
+            MaterialPrice.objects.filter(account=request.user.account, material=material).delete()
+            messages.success(request, f'Cleared the price for {material.name}.')
+            return redirect('estimating:library')
+        try:
+            unit_cost = Decimal(raw)
+        except (InvalidOperation, ValueError):
+            messages.error(request, 'Enter a valid price, e.g. 7.50.')
+            return redirect('estimating:library')
+        if unit_cost < 0:
+            messages.error(request, 'Price cannot be negative.')
+            return redirect('estimating:library')
+        MaterialPrice.objects.update_or_create(
+            account=request.user.account, material=material,
+            defaults={'unit_cost': unit_cost},
+        )
+        messages.success(request, f'Set {material.name} to ${unit_cost:.2f}.')
+        return redirect('estimating:library')
+
+
+class MaterialDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        from catalog.models import MaterialProduct
+
+        material = get_object_or_404(MaterialProduct.objects.filter(account=request.user.account), pk=pk)
+        name = material.name
+        try:
+            material.delete()
+        except ProtectedError:
+            messages.error(
+                request,
+                f'Could not delete "{name}" because it is still used by an assembly or estimate line.',
+            )
+        else:
+            messages.success(request, f'Material "{name}" deleted.')
+        return redirect('estimating:library')
 
 
 class AssemblyQuickEditView(LoginRequiredMixin, View):
@@ -730,7 +903,7 @@ class LibraryView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         from itertools import groupby
 
-        from catalog.models import MaterialProduct
+        from catalog.models import MaterialProduct, MaterialPrice
 
         context = super().get_context_data(**kwargs)
         account = self.request.user.account
@@ -741,6 +914,22 @@ class LibraryView(LoginRequiredMixin, TemplateView):
             .prefetch_related('lengths')
             .order_by('category', 'name')
         )
+        price_map = dict(
+            MaterialPrice.objects.filter(account=account)
+            .values_list('material_id', 'unit_cost')
+        )
+        for material in materials:
+            material.library_unit_cost = price_map.get(material.id)
+            material.library_length_values = list(material.lengths.all())
+            material.library_default_length_ft = None
+            material.library_supported_inputs = material.supported_input_type_labels
+            material.library_supports_ft = material.supports_input_type(MaterialProduct.InputType.FT)
+            material.library_supports_box = material.supports_input_type(MaterialProduct.InputType.BOX)
+            material.library_supports_each = material.supports_input_type(MaterialProduct.InputType.EACH)
+            if material.library_supports_ft:
+                default = next((length for length in material.library_length_values if length.is_default), None)
+                if default is not None:
+                    material.library_default_length_ft = default.length_ft
         label_for = dict(MaterialProduct.Category.choices)
         material_groups = []
         for category_key, items in groupby(materials, key=lambda m: m.category):

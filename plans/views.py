@@ -183,6 +183,75 @@ def _trace_payload(trace, measurement=None):
     return payload
 
 
+def _update_trace_from_payload(account, trace, payload):
+    settings_data = payload.get('settings') or {}
+    try:
+        validate_wall_member_overrides(settings_data.get('wall_member_overrides'))
+    except ValueError as exc:
+        return None, str(exc)
+
+    material, error = _resolve_material(account, payload.get('material_id'))
+    if error:
+        return None, error
+
+    assembly = None
+    if trace.tool_type == Trace.ToolType.OPENING:
+        candidate_wall = _peek_parent_wall(account, payload.get('parent_wall_id'), trace.plan_page)
+        assembly = _resolve_opening_assembly(account, settings_data, candidate_wall)
+    if assembly is None:
+        assembly, error = _resolve_assembly(
+            account, payload.get('assembly_id'), trace.tool_type, settings_data,
+        )
+        if error:
+            return None, error
+
+    needs_scale = trace.tool_type != Trace.ToolType.COUNT
+    if assembly is not None and needs_scale and trace.plan_page.scale_pixels_per_foot is None:
+        return None, 'Calibrate this page before assigning an assembly.'
+
+    parent_wall, error = _resolve_parent_wall(
+        account, payload.get('parent_wall_id'), trace.plan_page, trace.tool_type,
+    )
+    if error:
+        return None, error
+
+    color = payload.get('color') or ''
+    error = _validate_color(color)
+    if error:
+        return None, error
+
+    old_parent_wall = trace.parent_wall
+    old_parent_wall_id = trace.parent_wall_id
+    measurement = None
+    try:
+        with transaction.atomic():
+            trace.material = material
+            trace.assembly = assembly
+            trace.parent_wall = parent_wall
+            trace.settings = settings_data
+            trace.color = color
+            trace.save(update_fields=['material', 'assembly', 'parent_wall', 'settings', 'color'])
+            scale = trace.plan_page.scale_pixels_per_foot
+            if scale is not None or not needs_scale:
+                measurement = measure_geometry(
+                    trace.tool_type, trace.geometry, scale or 1, settings_data,
+                )
+            if assembly is not None:
+                estimate = trace.plan_page.plan.project.get_or_create_estimate()
+                generate_line_items(estimate, assembly, measurement, settings_data, trace=trace)
+            else:
+                LineItem.objects.filter(trace=trace).delete()
+            if old_parent_wall_id != trace.parent_wall_id:
+                if old_parent_wall is not None:
+                    _regenerate_wall_line_items(old_parent_wall)
+                if trace.parent_wall is not None:
+                    _regenerate_wall_line_items(trace.parent_wall)
+    except (ValueError, KeyError) as exc:
+        return None, str(exc)
+
+    return measurement, None
+
+
 class PlanUploadView(LoginRequiredMixin, View):
     def post(self, request, project_id):
         project = get_object_or_404(Project.objects.for_account(request.user.account), pk=project_id)
@@ -462,76 +531,59 @@ class TraceUpdateView(LoginRequiredMixin, View):
             payload = json.loads(request.body)
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON.'}, status=400)
-
-        settings_data = payload.get('settings') or {}
-        try:
-            validate_wall_member_overrides(settings_data.get('wall_member_overrides'))
-        except ValueError as exc:
-            return JsonResponse({'error': str(exc)}, status=400)
-
-        material, error = _resolve_material(account, payload.get('material_id'))
+        measurement, error = _update_trace_from_payload(account, trace, payload)
         if error:
             return JsonResponse({'error': error}, status=400)
-
-        assembly = None
-        if trace.tool_type == Trace.ToolType.OPENING:
-            candidate_wall = _peek_parent_wall(account, payload.get('parent_wall_id'), trace.plan_page)
-            assembly = _resolve_opening_assembly(account, settings_data, candidate_wall)
-        if assembly is None:
-            assembly, error = _resolve_assembly(
-                account, payload.get('assembly_id'), trace.tool_type, settings_data,
-            )
-            if error:
-                return JsonResponse({'error': error}, status=400)
-        needs_scale = trace.tool_type != Trace.ToolType.COUNT
-        if assembly is not None and needs_scale and trace.plan_page.scale_pixels_per_foot is None:
-            return JsonResponse({'error': 'Calibrate this page before assigning an assembly.'}, status=400)
-
-        parent_wall, error = _resolve_parent_wall(
-            account, payload.get('parent_wall_id'), trace.plan_page, trace.tool_type,
-        )
-        if error:
-            return JsonResponse({'error': error}, status=400)
-
-        color = payload.get('color') or ''
-        error = _validate_color(color)
-        if error:
-            return JsonResponse({'error': error}, status=400)
-
-        old_parent_wall = trace.parent_wall
-        old_parent_wall_id = trace.parent_wall_id
-
-        measurement = None
-        try:
-            with transaction.atomic():
-                trace.material = material
-                trace.assembly = assembly
-                trace.parent_wall = parent_wall
-                trace.settings = settings_data
-                trace.color = color
-                trace.save(update_fields=['material', 'assembly', 'parent_wall', 'settings', 'color'])
-                scale = trace.plan_page.scale_pixels_per_foot
-                if scale is not None or not needs_scale:
-                    measurement = measure_geometry(
-                        trace.tool_type, trace.geometry, scale or 1, settings_data,
-                    )
-                if assembly is not None:
-                    estimate = trace.plan_page.plan.project.get_or_create_estimate()
-                    generate_line_items(estimate, assembly, measurement, settings_data, trace=trace)
-                else:
-                    # Assembly cleared: drop any previously generated lines for this trace.
-                    LineItem.objects.filter(trace=trace).delete()
-                # Reattaching/detaching an opening changes its old and/or new
-                # wall's stud deduction - keep both wall's LineItems in sync.
-                if old_parent_wall_id != trace.parent_wall_id:
-                    if old_parent_wall is not None:
-                        _regenerate_wall_line_items(old_parent_wall)
-                    if trace.parent_wall is not None:
-                        _regenerate_wall_line_items(trace.parent_wall)
-        except (ValueError, KeyError) as exc:
-            return JsonResponse({'error': str(exc)}, status=400)
 
         return JsonResponse(_trace_payload(trace, measurement))
+
+
+class TraceBatchUpdateView(LoginRequiredMixin, View):
+    def post(self, request):
+        account = request.user.account
+        try:
+            payload = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON.'}, status=400)
+
+        trace_ids = payload.get('trace_ids')
+        if not isinstance(trace_ids, list) or not trace_ids:
+            return JsonResponse({'error': 'trace_ids must be a non-empty list.'}, status=400)
+
+        traces = list(Trace.objects.for_account(account).filter(pk__in=trace_ids).select_related('plan_page__plan__project'))
+        if len(traces) != len(set(trace_ids)):
+            return JsonResponse({'error': 'One or more traces were not found.'}, status=404)
+
+        apply_material = bool(payload.get('apply_material'))
+        apply_assembly = bool(payload.get('apply_assembly'))
+        apply_color = bool(payload.get('apply_color'))
+        apply_settings = bool(payload.get('apply_settings'))
+
+        if not any([apply_material, apply_assembly, apply_color, apply_settings]):
+            return JsonResponse({'error': 'No batch changes were requested.'}, status=400)
+
+        tool_types = {trace.tool_type for trace in traces}
+        if len(tool_types) > 1 and (apply_assembly or apply_settings):
+            return JsonResponse({'error': 'Assembly or settings can only be batch-applied to traces of the same type.'}, status=400)
+
+        first_tool_type = traces[0].tool_type
+        results = []
+        with transaction.atomic():
+            for trace in traces:
+                trace_payload = {
+                    'material_id': payload.get('material_id') if apply_material else trace.material_id,
+                    'assembly_id': payload.get('assembly_id') if apply_assembly else trace.assembly_id,
+                    'parent_wall_id': payload.get('parent_wall_id') if first_tool_type == Trace.ToolType.OPENING and apply_settings else trace.parent_wall_id,
+                    'color': payload.get('color') if apply_color else trace.color,
+                    'settings': payload.get('settings') if apply_settings else trace.settings,
+                }
+                measurement, error = _update_trace_from_payload(account, trace, trace_payload)
+                if error:
+                    transaction.set_rollback(True)
+                    return JsonResponse({'error': error}, status=400)
+                results.append(_trace_payload(trace, measurement))
+
+        return JsonResponse({'traces': results})
 
 
 class TraceDeleteView(LoginRequiredMixin, View):
@@ -563,12 +615,55 @@ class TraceDeleteView(LoginRequiredMixin, View):
         return JsonResponse({'deleted': True})
 
 
+class TraceBatchDeleteView(LoginRequiredMixin, View):
+    def post(self, request):
+        account = request.user.account
+        try:
+            payload = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON.'}, status=400)
+
+        trace_ids = payload.get('trace_ids')
+        if not isinstance(trace_ids, list) or not trace_ids:
+            return JsonResponse({'error': 'trace_ids must be a non-empty list.'}, status=400)
+
+        traces = list(Trace.objects.for_account(account).filter(pk__in=trace_ids).select_related('parent_wall'))
+        if len(traces) != len(set(trace_ids)):
+            return JsonResponse({'error': 'One or more traces were not found.'}, status=404)
+
+        trace_ids_set = {trace.pk for trace in traces}
+        parent_walls = [trace.parent_wall for trace in traces if trace.tool_type == Trace.ToolType.OPENING and trace.parent_wall_id]
+        deleted_walls = [trace for trace in traces if trace.tool_type in (Trace.ToolType.LINE, Trace.ToolType.POLYLINE)]
+        sibling_walls = list(
+            Trace.objects.filter(
+                plan_page_id__in={trace.plan_page_id for trace in deleted_walls},
+                tool_type__in=[Trace.ToolType.LINE, Trace.ToolType.POLYLINE],
+            ).exclude(pk__in=trace_ids_set)
+        ) if deleted_walls else []
+
+        with transaction.atomic():
+            Trace.objects.filter(pk__in=trace_ids_set).delete()
+
+        for wall in parent_walls:
+            try:
+                _regenerate_wall_line_items(wall)
+            except (ValueError, KeyError):
+                pass
+        for wall in sibling_walls:
+            if any(could_share_a_junction(deleted_trace, wall) for deleted_trace in deleted_walls):
+                try:
+                    _regenerate_wall_line_items(wall)
+                except (ValueError, KeyError):
+                    pass
+        return JsonResponse({'deleted': True, 'count': len(traces)})
+
+
 class ToolPresetListCreateView(LoginRequiredMixin, View):
     def get(self, request):
         tool_type = request.GET.get('tool_type', Trace.ToolType.LINE)
         presets = ToolPreset.objects.filter(account=request.user.account, tool_type=tool_type)
         return JsonResponse({'presets': list(
-            presets.values('id', 'name', 'material_id', 'settings', 'color'),
+            presets.values('id', 'name', 'material_id', 'assembly_id', 'settings', 'color', 'is_favorite'),
         )})
 
     def post(self, request):
@@ -581,6 +676,7 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         name = (payload.get('name') or '').strip()
         tool_type = payload.get('tool_type')
         material_id = payload.get('material_id')
+        assembly_id = payload.get('assembly_id')
         settings_data = payload.get('settings') or {}
         color = payload.get('color') or ''
 
@@ -592,18 +688,31 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         material, error = _resolve_material(account, material_id)
         if error:
             return JsonResponse({'error': error}, status=400)
+        assembly, error = _resolve_assembly(account, assembly_id, tool_type, settings_data)
+        if error:
+            return JsonResponse({'error': error}, status=400)
         error = _validate_color(color)
         if error:
             return JsonResponse({'error': error}, status=400)
 
         preset, created = ToolPreset.objects.update_or_create(
             account=account, tool_type=tool_type, name=name,
-            defaults={'material': material, 'settings': settings_data, 'color': color},
+            defaults={'material': material, 'assembly': assembly, 'settings': settings_data, 'color': color},
         )
         return JsonResponse({
             'id': preset.id,
             'name': preset.name,
             'material_id': preset.material_id,
+            'assembly_id': preset.assembly_id,
             'settings': preset.settings,
             'color': preset.color,
+            'is_favorite': preset.is_favorite,
         }, status=201 if created else 200)
+
+
+class ToolPresetFavoriteToggleView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        preset = get_object_or_404(ToolPreset, pk=pk, account=request.user.account)
+        preset.is_favorite = not preset.is_favorite
+        preset.save(update_fields=['is_favorite'])
+        return JsonResponse({'id': preset.id, 'is_favorite': preset.is_favorite})

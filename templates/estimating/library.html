@@ -11,6 +11,7 @@
     </div>
     <div class="page-head-actions">
         <a class="btn btn-outline-primary" href="{% url 'estimating:material-import' %}"><i class="bi bi-upload"></i> Import materials</a>
+        <a class="btn btn-outline-primary" href="{% url 'estimating:material-create' %}"><i class="bi bi-plus-lg"></i> New material</a>
         <a class="btn btn-outline-primary" href="{% url 'estimating:formula-create' %}"><i class="bi bi-plus-lg"></i> New formula</a>
         <a class="btn btn-primary" href="{% url 'estimating:assembly-create' %}"><i class="bi bi-plus-lg"></i> New assembly</a>
     </div>
@@ -62,16 +63,66 @@
                                 {% if material.grade %} &middot; {{ material.grade }}{% endif %}
                                 {% if material.nominal_dimension %} &middot; {{ material.nominal_dimension }}{% endif %}
                             </div>
+                            {% if material.library_supports_ft %}
+                            <div class="mat-card-meta">
+                                {% if material.library_default_length_ft %}
+                                    Default {{ material.library_default_length_ft|floatformat:"-2" }} ft
+                                {% else %}
+                                    <span class="text-warning">No default length set</span>
+                                {% endif %}
+                                {% if material.library_length_values %}
+                                &middot;
+                                {% for length in material.library_length_values %}
+                                    {{ length.length_ft|floatformat:"-2" }}{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                                ft
+                                {% else %}
+                                &middot; No stock lengths
+                                {% endif %}
+                            </div>
+                            {% elif material.library_supports_box and material.quantity_per_box %}
+                            <div class="mat-card-meta">{{ material.quantity_per_box }} per box</div>
+                            {% endif %}
                         </div>
                     </div>
                     <div class="mat-card-foot">
-                        <span class="tag tag-{{ material.input_type }}">
-                            {% if material.input_type == 'ft' %}<i class="bi bi-rulers"></i> Stock lengths
-                            {% elif material.input_type == 'box' %}<i class="bi bi-box2"></i> {{ material.quantity_per_box }}/box
-                            {% else %}<i class="bi bi-1-circle"></i> Each{% endif %}
-                        </span>
+                        {% if material.library_supports_ft %}
+                        <span class="tag tag-ft"><i class="bi bi-rulers"></i> Stock lengths</span>
+                        {% endif %}
+                        {% if material.library_supports_box %}
+                        <span class="tag tag-box"><i class="bi bi-box2"></i> {{ material.quantity_per_box }}/box</span>
+                        {% endif %}
+                        {% if material.library_supports_each %}
+                        <span class="tag tag-each"><i class="bi bi-1-circle"></i> Each</span>
+                        {% endif %}
                         {% if material.account_id %}<span class="tag tag-mine">Custom</span>{% else %}<span class="tag tag-stock">Stock</span>{% endif %}
+                        {% if material.library_unit_cost is not None %}<span class="tag tag-priced"><i class="bi bi-cash"></i> ${{ material.library_unit_cost|floatformat:2 }}/unit</span>{% endif %}
                     </div>
+                    <div class="mat-card-foot">
+                        <form method="post" action="{% url 'estimating:material-price' material.pk %}" class="mat-price-form">
+                            {% csrf_token %}
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">$</span>
+                                <input type="number" name="unit_cost" step="0.01" min="0" class="form-control"
+                                       value="{% if material.library_unit_cost is not None %}{{ material.library_unit_cost|floatformat:2 }}{% endif %}"
+                                       placeholder="Unit cost" aria-label="Unit cost for {{ material.name }}">
+                                <button class="btn btn-outline-primary" type="submit" title="Save price"><i class="bi bi-check-lg"></i></button>
+                            </div>
+                        </form>
+                    </div>
+                    {% if material.account_id %}
+                    <div class="mat-card-foot">
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'estimating:material-update' material.pk %}">
+                            <i class="bi bi-pencil"></i> Edit
+                        </a>
+                        <form method="post" action="{% url 'estimating:material-delete' material.pk %}" onsubmit="return confirm('Delete {{ material.name|escapejs }} from your library?');">
+                            {% csrf_token %}
+                            <button class="btn btn-sm btn-outline-danger" type="submit">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
                 </article>
                 {% endfor %}
             </div>

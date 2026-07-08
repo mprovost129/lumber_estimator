@@ -34,7 +34,7 @@ def _spacing_in(settings, default=16):
 def _stock_length_or_none(material, required_ft):
     """Smallest stock length covering `required_ft` for FT materials; None for
     each/box materials (e.g. trusses ordered per unit)."""
-    if material.input_type != MaterialProduct.InputType.FT:
+    if not material.supports_input_type(MaterialProduct.InputType.FT):
         return None
     return material.stock_length_for(required_ft)
 
@@ -43,7 +43,7 @@ def _spliced_pieces(material, required_ft):
     """(piece_count, piece_length_or_None) to build one member of `required_ft`,
     splicing from stock when it is longer than the longest stock piece. For
     each/box materials there are no stock lengths, so it is always one unit."""
-    if material.input_type != MaterialProduct.InputType.FT:
+    if not material.supports_input_type(MaterialProduct.InputType.FT):
         return 1, None
     return material.pieces_for_length(required_ft)
 
