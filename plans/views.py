@@ -183,12 +183,37 @@ def _trace_payload(trace, measurement=None):
     return payload
 
 
+def _validate_geometry_update(trace, geometry):
+    """A trace's geometry may be repositioned (drag-to-edit vertices/endpoints)
+    but not reshaped - the point count must match what was originally drawn,
+    since adding/removing vertices isn't supported by this endpoint."""
+    if not isinstance(geometry, list) or len(geometry) != len(trace.geometry):
+        return None, 'geometry must have the same number of points as the original trace.'
+    points = []
+    for point in geometry:
+        if not isinstance(point, dict) or 'x' not in point or 'y' not in point:
+            return None, 'geometry points must each have x and y.'
+        try:
+            points.append({'x': float(point['x']), 'y': float(point['y'])})
+        except (TypeError, ValueError):
+            return None, 'geometry point coordinates must be numbers.'
+    return points, None
+
+
 def _update_trace_from_payload(account, trace, payload):
     settings_data = payload.get('settings') or {}
     try:
         validate_wall_member_overrides(settings_data.get('wall_member_overrides'))
     except ValueError as exc:
         return None, str(exc)
+
+    geometry_update = None
+    if payload.get('geometry') is not None:
+        if trace.tool_type not in (Trace.ToolType.LINE, Trace.ToolType.POLYLINE):
+            return None, 'geometry editing is only supported for line and polyline traces.'
+        geometry_update, error = _validate_geometry_update(trace, payload['geometry'])
+        if error:
+            return None, error
 
     material, error = _resolve_material(account, payload.get('material_id'))
     if error:
@@ -225,12 +250,16 @@ def _update_trace_from_payload(account, trace, payload):
     measurement = None
     try:
         with transaction.atomic():
+            update_fields = ['material', 'assembly', 'parent_wall', 'settings', 'color']
             trace.material = material
             trace.assembly = assembly
             trace.parent_wall = parent_wall
             trace.settings = settings_data
             trace.color = color
-            trace.save(update_fields=['material', 'assembly', 'parent_wall', 'settings', 'color'])
+            if geometry_update is not None:
+                trace.geometry = geometry_update
+                update_fields.append('geometry')
+            trace.save(update_fields=update_fields)
             scale = trace.plan_page.scale_pixels_per_foot
             if scale is not None or not needs_scale:
                 measurement = measure_geometry(
@@ -246,6 +275,11 @@ def _update_trace_from_payload(account, trace, payload):
                     _regenerate_wall_line_items(old_parent_wall)
                 if trace.parent_wall is not None:
                     _regenerate_wall_line_items(trace.parent_wall)
+            if geometry_update is not None:
+                # The moved endpoint(s) can create or remove a corner/T
+                # junction with a neighboring wall - same regen already used
+                # when a wall is first drawn or deleted.
+                _regenerate_sibling_walls(trace)
     except (ValueError, KeyError) as exc:
         return None, str(exc)
 
@@ -663,7 +697,7 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         tool_type = request.GET.get('tool_type', Trace.ToolType.LINE)
         presets = ToolPreset.objects.filter(account=request.user.account, tool_type=tool_type)
         return JsonResponse({'presets': list(
-            presets.values('id', 'name', 'material_id', 'settings', 'color'),
+            presets.values('id', 'name', 'material_id', 'assembly_id', 'settings', 'color', 'is_favorite'),
         )})
 
     def post(self, request):
@@ -676,6 +710,7 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         name = (payload.get('name') or '').strip()
         tool_type = payload.get('tool_type')
         material_id = payload.get('material_id')
+        assembly_id = payload.get('assembly_id')
         settings_data = payload.get('settings') or {}
         color = payload.get('color') or ''
 
@@ -687,18 +722,31 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         material, error = _resolve_material(account, material_id)
         if error:
             return JsonResponse({'error': error}, status=400)
+        assembly, error = _resolve_assembly(account, assembly_id, tool_type, settings_data)
+        if error:
+            return JsonResponse({'error': error}, status=400)
         error = _validate_color(color)
         if error:
             return JsonResponse({'error': error}, status=400)
 
         preset, created = ToolPreset.objects.update_or_create(
             account=account, tool_type=tool_type, name=name,
-            defaults={'material': material, 'settings': settings_data, 'color': color},
+            defaults={'material': material, 'assembly': assembly, 'settings': settings_data, 'color': color},
         )
         return JsonResponse({
             'id': preset.id,
             'name': preset.name,
             'material_id': preset.material_id,
+            'assembly_id': preset.assembly_id,
             'settings': preset.settings,
             'color': preset.color,
+            'is_favorite': preset.is_favorite,
         }, status=201 if created else 200)
+
+
+class ToolPresetFavoriteToggleView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        preset = get_object_or_404(ToolPreset, pk=pk, account=request.user.account)
+        preset.is_favorite = not preset.is_favorite
+        preset.save(update_fields=['is_favorite'])
+        return JsonResponse({'id': preset.id, 'is_favorite': preset.is_favorite})

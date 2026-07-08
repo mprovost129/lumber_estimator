@@ -20,6 +20,23 @@
     .material-summary-row.is-unlinked {
         cursor: default;
     }
+    .material-summary-group-header {
+        cursor: pointer;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.5rem;
+        border-radius: 6px;
+        padding: 0.1rem 0.3rem;
+        margin: 0 -0.3rem 0.1rem;
+        transition: background-color 0.14s ease;
+    }
+    .material-summary-group-header:hover {
+        background: rgba(58, 124, 165, 0.08);
+    }
+    .material-summary-group-header .badge {
+        font-weight: 600;
+    }
 </style>
 {% if totals.total_pieces %}
 <div class="mat-summary-stats">
@@ -47,7 +64,10 @@
 {% if category_groups %}
 {% for group in category_groups %}
 <div class="mb-3 material-summary-group" data-category-label="{{ group.grouper }}">
-    <p class="small fw-bold mb-1">{{ group.grouper }}</p>
+    <p class="small fw-bold mb-1 material-summary-group-header" role="button" title="Highlight every traced element feeding this category on this page">
+        <span>{{ group.grouper }}</span>
+        <span class="badge rounded-pill text-bg-light border material-summary-group-count"></span>
+    </p>
     <table class="table table-sm mb-0">
         <tbody>
             {% for row in group.list %}

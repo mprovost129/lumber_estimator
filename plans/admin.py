@@ -30,5 +30,5 @@ class TraceAdmin(admin.ModelAdmin):
 
 @admin.register(ToolPreset)
 class ToolPresetAdmin(admin.ModelAdmin):
-    list_display = ('name', 'account', 'tool_type', 'material')
-    list_filter = ('tool_type', 'account')
+    list_display = ('name', 'account', 'tool_type', 'material', 'assembly', 'is_favorite')
+    list_filter = ('tool_type', 'account', 'is_favorite')

@@ -544,3 +544,126 @@ class WallJunctionRegenerationTests(TestCase):
         response = self.client.post(reverse('plans:trace-delete', args=[opening.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._stud_quantity(wall_a), baseline)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class TraceGeometryUpdateTests(TestCase):
+    """Drag-to-edit vertex support: a line/polyline trace's geometry may be
+    repositioned (not reshaped) through the same update endpoint used for
+    material/assembly/settings edits."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email='geom-edit@example.com', password='testpass123')
+        self.project = Project.objects.create(account=self.user.account, name='Geometry Edit House')
+        JobSettings.objects.create(project=self.project)
+        self.page = make_plan_page(self.project)
+
+        self.stud = MaterialProduct.objects.create(name='Geom Edit 2x6', input_type=MaterialProduct.InputType.FT)
+        MaterialLength.objects.create(product=self.stud, length_ft=16, is_default=True)
+        self.assembly = Assembly.objects.create(name='Geom Edit Wall', tool_type='line')
+        CalculationRule.objects.create(
+            assembly=self.assembly, material=self.stud, role='Stud',
+            formula_kind=CalculationRule.FormulaKind.PER_SPACING,
+            waste_factor=Decimal('0'), order=1,
+        )
+        # 300px line = 10ft, so 30 pixels per foot.
+        self.page.scale_pixels_per_foot = Decimal('30')
+        self.page.save(update_fields=['scale_pixels_per_foot'])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'line', 'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}],
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.wall = Trace.objects.get(pk=response.json()['id'])
+
+    def test_dragging_an_endpoint_updates_geometry_and_recomputes_the_stud_count(self):
+        self.assertEqual(LineItem.objects.get(trace=self.wall).quantity, 8)  # ceil(120/16)
+
+        response = self.client.post(
+            reverse('plans:trace-update', args=[self.wall.pk]),
+            data=json.dumps({
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+                'geometry': [{'x': 0, 'y': 0}, {'x': 600, 'y': 0}],  # stretched to 20ft
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['geometry'], [{'x': 0, 'y': 0}, {'x': 600, 'y': 0}])
+
+        self.wall.refresh_from_db()
+        self.assertEqual(self.wall.geometry, [{'x': 0, 'y': 0}, {'x': 600, 'y': 0}])
+        self.assertEqual(LineItem.objects.get(trace=self.wall).quantity, 15)  # ceil(240/16)
+
+    def test_geometry_point_count_must_match_original(self):
+        response = self.client.post(
+            reverse('plans:trace-update', args=[self.wall.pk]),
+            data=json.dumps({'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}, {'x': 300, 'y': 300}]}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.wall.refresh_from_db()
+        self.assertEqual(self.wall.geometry, [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}])
+
+    def test_geometry_edit_rejected_for_unsupported_tool_types(self):
+        count_trace = Trace.objects.create(
+            plan_page=self.page, tool_type=Trace.ToolType.COUNT,
+            geometry=[{'x': 10, 'y': 10}],
+        )
+        response = self.client.post(
+            reverse('plans:trace-update', args=[count_trace.pk]),
+            data=json.dumps({'geometry': [{'x': 20, 'y': 20}]}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        count_trace.refresh_from_db()
+        self.assertEqual(count_trace.geometry, [{'x': 10, 'y': 10}])
+
+    def test_dragging_an_endpoint_to_meet_a_neighbor_creates_a_junction(self):
+        neighbor = self.client.post(
+            reverse('plans:trace-create', args=[self.page.pk]),
+            data=json.dumps({
+                'tool_type': 'line', 'geometry': [{'x': 900, 'y': 0}, {'x': 900, 'y': 300}],
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+            }),
+            content_type='application/json',
+        )
+        neighbor_wall = Trace.objects.get(pk=neighbor.json()['id'])
+        baseline = LineItem.objects.get(trace=self.wall).quantity
+        self.assertEqual(baseline, 8)
+        self.assertEqual(LineItem.objects.get(trace=neighbor_wall).quantity, 8)
+
+        # Stretch the first wall's far endpoint to exactly meet the neighbor's
+        # corner - should pick up the same corner_stud_count bonus that a
+        # freshly-drawn wall meeting it would get.
+        response = self.client.post(
+            reverse('plans:trace-update', args=[self.wall.pk]),
+            data=json.dumps({
+                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+                'geometry': [{'x': 0, 'y': 0}, {'x': 900, 'y': 0}],
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertGreater(LineItem.objects.get(trace=neighbor_wall).quantity, baseline)
+
+    def test_cannot_edit_geometry_of_other_accounts_trace(self):
+        other_user = User.objects.create_user(email='geom-edit-2@example.com', password='testpass123')
+        foreign_project = Project.objects.create(account=other_user.account, name='Foreign Geometry House')
+        JobSettings.objects.create(project=foreign_project)
+        foreign_page = make_plan_page(foreign_project)
+        foreign_trace = Trace.objects.create(
+            plan_page=foreign_page, tool_type='line',
+            geometry=[{'x': 0, 'y': 0}, {'x': 100, 'y': 0}],
+        )
+        response = self.client.post(
+            reverse('plans:trace-update', args=[foreign_trace.pk]),
+            data=json.dumps({'geometry': [{'x': 5, 'y': 5}, {'x': 105, 'y': 5}]}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)

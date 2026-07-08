@@ -17,4 +17,5 @@ urlpatterns = [
     path('traces/<int:pk>/wall-elevation/', views.WallElevationView.as_view(), name='wall-elevation'),
     path('traces/<int:pk>/delete/', views.TraceDeleteView.as_view(), name='trace-delete'),
     path('presets/', views.ToolPresetListCreateView.as_view(), name='presets'),
+    path('presets/<int:pk>/favorite/', views.ToolPresetFavoriteToggleView.as_view(), name='preset-favorite'),
 ]
