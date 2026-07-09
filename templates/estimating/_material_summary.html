@@ -20,6 +20,13 @@
     .material-summary-row.is-unlinked {
         cursor: default;
     }
+    .material-summary-row td {
+        font-size: 0.75rem;
+        line-height: 1.16;
+        padding-top: 0.24rem;
+        padding-bottom: 0.24rem;
+        vertical-align: top;
+    }
     .material-summary-group-header {
         cursor: pointer;
         display: flex;
@@ -30,12 +37,74 @@
         padding: 0.1rem 0.3rem;
         margin: 0 -0.3rem 0.1rem;
         transition: background-color 0.14s ease;
+        font-size: 0.75rem;
     }
     .material-summary-group-header:hover {
         background: rgba(58, 124, 165, 0.08);
     }
     .material-summary-group-header .badge {
         font-weight: 600;
+        font-size: 0.68rem;
+    }
+    .material-summary-row .text-muted,
+    .material-summary-row .small {
+        font-size: 0.58rem;
+        line-height: 1.12;
+    }
+    .material-summary-subline {
+        margin-top: 0.08rem;
+    }
+    .material-summary-meta-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.35rem;
+        flex-wrap: nowrap;
+    }
+    .material-summary-meta-row .material-summary-subline {
+        margin-top: 0;
+        min-width: 0;
+    }
+    .material-summary-meta-row .badge {
+        flex: 0 0 auto;
+    }
+    .material-summary-meta {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.3rem;
+    }
+    .material-summary-qty {
+        font-weight: 600;
+        line-height: 1.1;
+        font-size: 0.82rem;
+    }
+    .material-summary-sidecell {
+        white-space: normal;
+    }
+    .material-group-waste-editor {
+        display: inline-flex;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        width: min(100%, 6.5rem);
+        margin-left: auto;
+    }
+    .material-group-waste-editor .form-control,
+    .material-group-waste-editor .input-group-text {
+        padding-top: 0.08rem;
+        padding-bottom: 0.08rem;
+        font-size: 0.6rem;
+    }
+    .material-group-waste-editor .form-control {
+        min-width: 2.2rem;
+        padding-left: 0.24rem;
+        padding-right: 0.24rem;
+    }
+    .material-group-waste-editor .input-group-text {
+        white-space: nowrap;
+        flex: 0 0 auto;
+        padding-left: 0.26rem;
+        padding-right: 0.26rem;
     }
 </style>
 {% if totals.total_pieces %}
@@ -82,31 +151,30 @@
                     {{ row.material__name }}
                     {% if row.role_label %}<span class="text-muted">&middot; {{ row.role_label }}</span>{% endif %}
                     {% if row.length_ft %}<span class="text-muted">&middot; {{ row.length_ft|floatformat:0 }} ft</span>{% endif %}
-                    {% if row.material_group_label %}
-                    <div class="small text-muted">Group: {{ row.material_group_label }}</div>
-                    {% endif %}
-                    {% if row.visible_trace_count %}
-                    <span class="badge rounded-pill text-bg-light border ms-1">{{ row.visible_trace_count }} trace{{ row.visible_trace_count|pluralize }}</span>
-                    {% endif %}
-                    {% if row.total_trace_count %}
-                    <div class="small text-muted">
-                        {% if row.visible_trace_count and row.visible_trace_count != row.total_trace_count %}
-                        Links to {{ row.visible_trace_count }} on this page of {{ row.total_trace_count }} traced element{{ row.total_trace_count|pluralize }}
-                        {% elif row.visible_trace_count %}
-                        Links to {{ row.visible_trace_count }} traced element{{ row.visible_trace_count|pluralize }}
-                        {% else %}
-                        Links live on other page{{ row.page_count|pluralize }}
+                    {% if row.material_group_label or row.total_trace_count %}
+                    <div class="material-summary-meta-row material-summary-subline">
+                        {% if row.material_group_label %}
+                        <div class="small text-muted material-summary-subline">Group &middot; {{ row.material_group_label }}</div>
+                        {% endif %}
+                        {% if row.total_trace_count %}
+                        <span
+                            class="badge rounded-pill text-bg-light border"
+                            title="{% if row.visible_trace_count and row.visible_trace_count != row.total_trace_count %}{{ row.visible_trace_count }} of {{ row.total_trace_count }} linked traces are on this page.{% elif row.visible_trace_count %}{{ row.visible_trace_count }} linked trace{{ row.visible_trace_count|pluralize }} on this page.{% else %}Linked traces live on {{ row.page_count }} other page{{ row.page_count|pluralize }}.{% endif %}">
+                            {% if row.visible_trace_count %}{{ row.visible_trace_count }}{% else %}{{ row.total_trace_count }}{% endif %} trace{{ row.total_trace_count|pluralize }}
+                        </span>
                         {% endif %}
                     </div>
                     {% endif %}
                 </td>
-                <td class="text-end text-nowrap">
-                    {% if row.trace_ids %}
-                    <button type="button" class="mat-vis-toggle" title="Show or hide these traces on the plan" aria-label="Toggle trace visibility">
-                        <i class="bi bi-eye"></i>
-                    </button>
-                    {% endif %}
-                    <div>{{ row.total_quantity }}</div>
+                <td class="text-end material-summary-sidecell">
+                    <div class="material-summary-meta">
+                        {% if row.trace_ids %}
+                        <button type="button" class="mat-vis-toggle" title="Show or hide these traces on the plan" aria-label="Toggle trace visibility">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        {% endif %}
+                        <div class="material-summary-qty">{{ row.total_quantity }}</div>
+                    </div>
                     {% if row.material_group_id %}
                     <div class="input-group input-group-sm material-group-waste-editor mt-1">
                         <input

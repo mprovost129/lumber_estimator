@@ -81,6 +81,35 @@
         border-radius: var(--bs-border-radius);
         background: rgba(253, 126, 20, 0.08);
     }
+    .viewer-notice-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        padding: 0.8rem 1rem;
+        border: 1px solid rgba(255, 145, 77, 0.35);
+        border-radius: var(--bs-border-radius);
+        background: linear-gradient(180deg, rgba(255, 145, 77, 0.14), rgba(255, 145, 77, 0.08));
+        box-shadow: 0 0.5rem 1.25rem rgba(44, 54, 64, 0.06);
+    }
+    .viewer-notice-copy {
+        min-width: 0;
+    }
+    .viewer-notice-title {
+        margin: 0 0 0.15rem;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #8a3d0f;
+    }
+    .viewer-notice-copy p {
+        margin: 0;
+        font-size: 0.88rem;
+        color: #6b4a35;
+    }
+    .viewer-notice-bar .btn {
+        flex: 0 0 auto;
+    }
     #wall-elevation-modal {
         position: fixed; inset: 5vh 5vw; z-index: 1050; background: var(--bs-white); border: 1px solid var(--brand-gray-border);
         border-radius: var(--bs-border-radius); box-shadow: 0 1rem 3rem rgba(44,54,64,.35); padding: 1rem; display: none; overflow: auto;
@@ -161,6 +190,13 @@
     <a href="{% url 'projects:detail' project.pk %}">&larr; Back to {{ project.name }}</a>
     &middot; <a href="{% url 'estimating:estimate-detail' estimate.pk %}">Material List</a>
 </p>
+<div id="no-selection-panel" class="viewer-notice-bar no-print" style="display: none;">
+    <div class="viewer-notice-copy">
+        <div class="viewer-notice-title">Select a tool to start</div>
+        <p>Select a tool from the toolbar above to draw, or click an existing trace to view or edit it.</p>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="dismiss-onboarding-tip">Got it</button>
+</div>
 
 <div id="plan-viewer"
      data-project-id="{{ project.pk }}"
@@ -296,11 +332,6 @@
     <div id="tool-panel">
         <p class="small text-muted" id="tool-hint"></p>
         <p class="small fw-bold" id="last-measurement"></p>
-
-        <div id="no-selection-panel">
-            <p class="text-muted small mb-2">Select a tool from the toolbar above to draw, or click an existing trace to view or edit it.</p>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="dismiss-onboarding-tip">Got it</button>
-        </div>
 
         <div id="calibrate-panel" style="display: none;">
             <p class="text-muted small mb-2">
@@ -523,7 +554,7 @@
         </p>
         <div class="dropdown mb-3">
             <button type="button" class="btn btn-outline-secondary material-controls-trigger dropdown-toggle" id="material-controls-trigger" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                <span>Filters &amp; actions</span>
+                <span>Filters &amp; Actions</span>
             </button>
             <div class="dropdown-menu dropdown-menu-end material-controls-menu">
                 <div class="small fw-semibold text-uppercase text-muted mb-2">Filters</div>

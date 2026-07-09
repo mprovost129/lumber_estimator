@@ -4400,15 +4400,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ------------------------------------------------------------------ misc
 
-    // A one-time onboarding tip ("select a tool to draw...") - shown until the
-    // user dismisses it or picks any tool for the first time (see
-    // activateTool), whichever comes first, then never again on any project.
+    // A one-time onboarding tip ("select a tool to draw...") - once it has
+    // been shown on any plan page, it should not come back on refresh or on
+    // other pages, even if the user never explicitly clicks "Got it".
     // Persisted in localStorage (not sessionStorage) since this is about the
     // user's familiarity with the app, not any one page/session.
-    var ONBOARDING_TIP_KEY = 'planViewerOnboardingTipDismissed';
+    var ONBOARDING_TIP_KEY = 'planViewerOnboardingTipSeen';
     var onboardingTipTimer = null;
 
-    function onboardingTipDismissed() {
+    function onboardingTipSeen() {
         try {
             if (window.localStorage.getItem(ONBOARDING_TIP_KEY) === '1') {
                 return true;
@@ -4417,7 +4417,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return document.cookie.indexOf(ONBOARDING_TIP_KEY + '=1') !== -1;
     }
 
-    function persistOnboardingTipDismissal() {
+    function persistOnboardingTipSeen() {
         try {
             window.localStorage.setItem(ONBOARDING_TIP_KEY, '1');
         } catch (e) { /* storage unavailable */ }
@@ -4429,13 +4429,13 @@ document.addEventListener('DOMContentLoaded', function () {
             window.clearTimeout(onboardingTipTimer);
             onboardingTipTimer = null;
         }
-        persistOnboardingTipDismissal();
+        persistOnboardingTipSeen();
         noSelectionPanel.style.display = 'none';
         refreshToolPanelVisibility();
     }
 
     function scheduleOnboardingTipAutoDismiss() {
-        if (onboardingTipTimer || onboardingTipDismissed()) {
+        if (onboardingTipTimer || onboardingTipSeen()) {
             return;
         }
         onboardingTipTimer = window.setTimeout(function () {
@@ -4453,8 +4453,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // tool-specific hint (Calibrate/Hand), or the one-time onboarding tip.
     // Otherwise it collapses away entirely rather than sitting there empty.
     function refreshToolPanelVisibility() {
-        var anyVisible = noSelectionPanel.style.display !== 'none' ||
-            calibratePanel.style.display !== 'none' ||
+        var anyVisible = calibratePanel.style.display !== 'none' ||
             toolSettingsPanel.style.display !== 'none' ||
             traceInspectorPanel.style.display !== 'none' ||
             bulkSelectionPanel.style.display !== 'none' ||
@@ -4463,12 +4462,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function showPanel(name) {
-        noSelectionPanel.style.display = (name === 'none' && !onboardingTipDismissed()) ? '' : 'none';
+        noSelectionPanel.style.display = (name === 'none' && !onboardingTipSeen()) ? '' : 'none';
         calibratePanel.style.display = name === 'calibrate' ? '' : 'none';
         toolSettingsPanel.style.display = name === 'tool-settings' ? '' : 'none';
         traceInspectorPanel.style.display = name === 'inspector' ? '' : 'none';
         bulkSelectionPanel.style.display = name === 'bulk' ? '' : 'none';
         if (noSelectionPanel.style.display !== 'none') {
+            persistOnboardingTipSeen();
             scheduleOnboardingTipAutoDismiss();
         } else if (onboardingTipTimer) {
             window.clearTimeout(onboardingTipTimer);
