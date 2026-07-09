@@ -29,9 +29,10 @@
         </div>
         <p class="small text-muted">
             Choose either a library formula or a framing formula kind for each row - picking one clears
-            and locks the other. Fields specific to one formula kind (e.g. corner/T-intersection stud
-            counts for "Count by spacing", coverage for "Units by coverage area") only show up once
-            that kind is selected.
+            and locks the other. Assign each row to a reusable material group here; the waste % now
+            lives on that group and is edited from the estimate material lists. Fields specific to one
+            formula kind (e.g. corner/T-intersection stud counts for "Count by spacing", coverage for
+            "Units by coverage area") only show up once that kind is selected.
         </p>
         {{ rules.management_form }}
         {% if rules.non_form_errors %}<div class="alert alert-danger">{{ rules.non_form_errors }}</div>{% endif %}

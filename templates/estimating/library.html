@@ -148,7 +148,7 @@
                         <h3 class="asm-card-name">{{ assembly.name }}</h3>
                         <div class="asm-card-head-side">
                             {% if assembly.account_id %}<span class="tag tag-mine">Custom</span>{% else %}<span class="tag tag-stock">Stock</span>{% endif %}
-                            <button type="button" class="asm-edit-btn" data-assembly-id="{{ assembly.pk }}" title="Quick edit materials and waste">
+                            <button type="button" class="asm-edit-btn" data-assembly-id="{{ assembly.pk }}" title="Quick edit materials and material groups">
                                 <i class="bi bi-pencil"></i>
                             </button>
                         </div>
@@ -208,6 +208,7 @@
 
 {% block extra_js %}
 {{ materials_flat|json_script:"materials-flat" }}
+{{ material_groups_flat|json_script:"material-groups-flat" }}
 <div id="asm-drawer" class="asm-drawer" hidden>
     <div class="asm-drawer-scrim" data-drawer-close></div>
     <div class="asm-drawer-panel" role="dialog" aria-label="Quick edit assembly">
@@ -314,7 +315,7 @@
     }
 
     // ------------------------------------------------- quick-edit drawer
-    // Edit a rule's material or waste without the full assembly form. Editing
+    // Edit a rule's material or material group without the full assembly form. Editing
     // a stock assembly clones it into "my library" server-side (copy-on-write),
     // so the drawer warns about that and the page reloads after save to
     // re-render the grouped lists with the clone in place.
@@ -325,6 +326,7 @@
     var drawerError = document.getElementById('asm-drawer-error');
     var drawerSave = document.getElementById('asm-drawer-save');
     var materialsFlat = JSON.parse(document.getElementById('materials-flat').textContent);
+    var materialGroupsFlat = JSON.parse(document.getElementById('material-groups-flat').textContent);
     var quickEditUrlBase = "{% url 'estimating:assembly-quick-edit' 0 %}";
     var csrftoken = '{{ csrf_token }}';
     var openAssemblyId = null;
@@ -334,6 +336,16 @@
         materialsFlat.forEach(function (m) {
             html += '<option value="' + m.id + '"' + (m.id === selectedId ? ' selected' : '') + '>'
                  + m.name.replace(/</g, '&lt;') + '</option>';
+        });
+        return html + '</select>';
+    }
+
+    function materialGroupSelectHtml(selectedId) {
+        var html = '<select class="form-select form-select-sm asm-rule-material-group">';
+        html += '<option value="">Unassigned</option>';
+        materialGroupsFlat.forEach(function (group) {
+            html += '<option value="' + group.id + '"' + (group.id === selectedId ? ' selected' : '') + '>'
+                 + group.name.replace(/</g, '&lt;') + '</option>';
         });
         return html + '</select>';
     }
@@ -353,15 +365,12 @@
                     : 'Your assembly: changes save in place.';
                 var html = '';
                 data.rules.forEach(function (rule) {
-                    var wastePct = Math.round(parseFloat(rule.waste_factor) * 1000) / 10;
                     html += '<div class="asm-drawer-rule" data-rule-id="' + rule.id + '">'
                          + '<div class="asm-drawer-rule-head"><strong>' + rule.role.replace(/</g, '&lt;') + '</strong>'
                          + '<span class="asm-drawer-kind">' + rule.kind.replace(/</g, '&lt;') + '</span></div>'
                          + '<div class="asm-drawer-rule-fields">'
                          + materialSelectHtml(rule.material_id)
-                         + '<div class="input-group input-group-sm asm-waste-group">'
-                         + '<input type="number" class="form-control asm-rule-waste" min="0" max="100" step="0.5" value="' + wastePct + '">'
-                         + '<span class="input-group-text">% waste</span></div>'
+                         + materialGroupSelectHtml(rule.material_group_id)
                          + '</div></div>';
                 });
                 drawerBody.innerHTML = html || '<p class="text-muted small">No rules on this assembly.</p>';
@@ -393,20 +402,14 @@
     drawerSave.addEventListener('click', function () {
         if (!openAssemblyId) { return; }
         var rules = [];
-        var valid = true;
         drawerBody.querySelectorAll('.asm-drawer-rule').forEach(function (row) {
-            var pct = parseFloat(row.querySelector('.asm-rule-waste').value);
-            if (isNaN(pct) || pct < 0 || pct > 100) { valid = false; return; }
+            var groupValue = row.querySelector('.asm-rule-material-group').value;
             rules.push({
                 id: parseInt(row.dataset.ruleId, 10),
                 material_id: parseInt(row.querySelector('.asm-rule-material').value, 10),
-                waste_factor: (pct / 100).toFixed(3),
+                material_group_id: groupValue ? parseInt(groupValue, 10) : null,
             });
         });
-        if (!valid) {
-            drawerError.textContent = 'Waste must be between 0 and 100 percent.';
-            return;
-        }
         drawerSave.disabled = true;
         drawerError.textContent = '';
         fetch(quickEditUrlBase.replace('0', openAssemblyId), {

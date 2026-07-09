@@ -16,7 +16,7 @@ from plans.geometry import measure_geometry
 from plans.models import Trace
 from plans.wall_junctions import detect_wall_junctions
 
-from .models import CalculationRule, LineItem
+from .models import CalculationRule, EstimateMaterialGroup, LineItem
 
 NO_JUNCTIONS = {'corner_count': 0, 'partition_t_count': 0, 'through_t_count': 0}
 
@@ -184,6 +184,19 @@ def apply_waste(raw_quantity, waste_factor):
     return math.ceil(Decimal(raw_quantity) * (Decimal('1') + waste_factor))
 
 
+def effective_waste_factor(rule, override_map):
+    """Estimate overrides win; otherwise use the rule's material group's
+    default waste, falling back to the legacy per-rule value for unmapped
+    rules or old data."""
+    if rule.material_group_id:
+        override = override_map.get(rule.material_group_id)
+        if override is not None:
+            return override
+        if rule.material_group.default_waste_factor is not None:
+            return rule.material_group.default_waste_factor
+    return rule.waste_factor
+
+
 def generate_line_items(estimate, assembly, measurement, settings=None, trace=None):
     """Apply every CalculationRule in `assembly` against `measurement` and
     `settings`, (re)creating LineItems on `estimate`. If `trace` is given,
@@ -199,14 +212,21 @@ def generate_line_items(estimate, assembly, measurement, settings=None, trace=No
 
     opening_deduction_ft = _attached_opening_width_ft(trace)
     junctions = detect_wall_junctions(trace) if trace is not None else None
+    override_map = dict(
+        EstimateMaterialGroup.objects.filter(estimate=estimate).values_list('material_group_id', 'waste_factor')
+    )
 
     created = []
-    for rule in assembly.rules.select_related('material', 'formula', 'formula__base_formula').order_by('order'):
+    for rule in assembly.rules.select_related(
+        'material', 'material_group', 'formula', 'formula__base_formula',
+    ).order_by('order'):
         raw_quantity, piece_length_ft = evaluate_rule(rule, measurement, settings, opening_deduction_ft, junctions)
-        quantity = apply_waste(raw_quantity, rule.waste_factor)
+        waste_factor = effective_waste_factor(rule, override_map)
+        quantity = apply_waste(raw_quantity, waste_factor)
         created.append(LineItem.objects.create(
             estimate=estimate, trace=trace, calculation_rule=rule, material=rule.material,
-            role=rule.role, category=assembly.category, length_ft=piece_length_ft, quantity=quantity,
-            waste_factor=rule.waste_factor, source=LineItem.Source.TOOL,
+            material_group=rule.material_group, role=rule.role, category=assembly.category,
+            length_ft=piece_length_ft, quantity=quantity, waste_factor=waste_factor,
+            source=LineItem.Source.TOOL,
         ))
     return created

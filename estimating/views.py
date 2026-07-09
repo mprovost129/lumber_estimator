@@ -21,12 +21,17 @@ from accounts.models import Account
 from billing.services import estimate_output_access
 from projects.models import Estimate
 
+from .calculations import generate_line_items
 from .forms import AssemblyForm, CalculationRuleFormSet, FormulaForm, ManualLineItemForm, MaterialForm
-from .models import Assembly, CalculationRule, Formula, LineItem
+from .models import Assembly, CalculationRule, EstimateMaterialGroup, Formula, LineItem, MaterialGroup
 
 CATEGORY_DEFAULT_ORDER = list(Assembly.Category.values)
 CATEGORY_LABELS = dict(Assembly.Category.choices)
 VALID_CATEGORIES = set(Assembly.Category.values)
+
+
+def _waste_percent(waste_factor):
+    return (Decimal(str(waste_factor)) * Decimal('100')).normalize()
 
 
 def _effective_category():
@@ -72,8 +77,11 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
     rows = list(
         _summary_line_items(estimate, page_id=page_id, page_only=page_only)
         .order_by()
-        .values('effective_category', 'material_id', 'material__name', 'material__nominal_dimension',
-                'material__species', 'material__grade', 'length_ft')
+        .values(
+            'effective_category', 'material_id', 'material__name', 'material__nominal_dimension',
+            'material__species', 'material__grade', 'material_group_id', 'material_group__name',
+            'length_ft', 'waste_factor',
+        )
         .annotate(total_quantity=Sum('quantity'), min_role=Min('role'))
     )
     # min_role is a deterministic tiebreak for the rare case where a merged
@@ -87,6 +95,8 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
     for row in rows:
         row['category_label'] = CATEGORY_LABELS.get(row['effective_category'], row['effective_category'])
         row['role_label'] = row.get('min_role') or ''
+        row['material_group_label'] = row.get('material_group__name') or ''
+        row['waste_percent'] = _waste_percent(row.get('waste_factor') or Decimal('0'))
     return rows
 
 
@@ -167,7 +177,8 @@ def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=
         .exclude(trace_id__isnull=True)
         .values(
             'effective_category', 'material__name', 'material__nominal_dimension',
-            'material__species', 'material__grade', 'length_ft', 'trace_id', 'trace__plan_page_id',
+            'material__species', 'material__grade', 'material_group_id', 'waste_factor',
+            'length_ft', 'trace_id', 'trace__plan_page_id',
         )
     )
     for item in line_items:
@@ -177,6 +188,8 @@ def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=
             item['material__nominal_dimension'],
             item['material__species'],
             item['material__grade'],
+            item['material_group_id'],
+            item['waste_factor'],
             item['length_ft'],
         )
         total_trace_map.setdefault(key, set()).add(item['trace_id'])
@@ -190,6 +203,8 @@ def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=
             row['material__nominal_dimension'],
             row['material__species'],
             row['material__grade'],
+            row['material_group_id'],
+            row['waste_factor'],
             row['length_ft'],
         )
         total_trace_ids = sorted(total_trace_map.get(key, set()))
@@ -252,10 +267,12 @@ class EstimateDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         account = self.request.user.account
         line_items = list(
-            self.object.line_items.select_related('material', 'trace__plan_page')
+            self.object.line_items.select_related('material', 'material_group', 'trace__plan_page')
             .annotate(effective_category=_effective_category())
             .order_by()
         )
+        for item in line_items:
+            item.waste_percent = _waste_percent(item.waste_factor or Decimal('0'))
         category_rank = {c: i for i, c in enumerate(_category_order_for(account))}
         line_items.sort(key=lambda li: (
             category_rank.get(li.effective_category, len(category_rank)),
@@ -312,6 +329,70 @@ class EstimateMaterialSummaryView(LoginRequiredMixin, DetailView):
         context['page_only'] = page_only
         context['current_page_id'] = current_page_id
         return context
+
+
+class EstimateMaterialGroupWasteUpdateView(LoginRequiredMixin, View):
+    """Update one estimate's waste override for a reusable material group and
+    recalculate every affected tool-generated trace on that estimate."""
+
+    def post(self, request, pk, group_id):
+        from plans.geometry import measure_geometry
+        from plans.models import Trace
+
+        estimate = get_object_or_404(Estimate.objects.for_account(request.user.account), pk=pk)
+        material_group = get_object_or_404(MaterialGroup, pk=group_id)
+
+        try:
+            payload = json.loads(request.body)
+            waste_percent = Decimal(str(payload['waste_percent']))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError, ArithmeticError):
+            return JsonResponse({'error': 'Invalid waste percent.'}, status=400)
+
+        if not (Decimal('0') <= waste_percent <= Decimal('100')):
+            return JsonResponse({'error': 'Waste percent must be between 0 and 100.'}, status=400)
+
+        waste_factor = (waste_percent / Decimal('100')).quantize(Decimal('0.001'))
+        default_factor = material_group.default_waste_factor
+
+        with transaction.atomic():
+            if waste_factor == default_factor:
+                EstimateMaterialGroup.objects.filter(
+                    estimate=estimate, material_group=material_group,
+                ).delete()
+            else:
+                EstimateMaterialGroup.objects.update_or_create(
+                    estimate=estimate,
+                    material_group=material_group,
+                    defaults={'waste_factor': waste_factor},
+                )
+
+            trace_ids = list(
+                estimate.line_items.filter(
+                    source=LineItem.Source.TOOL,
+                    material_group=material_group,
+                    trace_id__isnull=False,
+                )
+                .values_list('trace_id', flat=True)
+                .distinct()
+            )
+            traces = list(
+                Trace.objects.filter(pk__in=trace_ids)
+                .select_related('assembly', 'plan_page')
+                .order_by('pk')
+            )
+            for trace in traces:
+                if not trace.assembly_id or trace.plan_page.scale_pixels_per_foot is None:
+                    continue
+                measurement = measure_geometry(
+                    trace.tool_type, trace.geometry, trace.plan_page.scale_pixels_per_foot, trace.settings,
+                )
+                generate_line_items(estimate, trace.assembly, measurement, trace.settings, trace=trace)
+
+        return JsonResponse({
+            'material_group_id': material_group.pk,
+            'waste_factor': str(waste_factor),
+            'waste_percent': str(_waste_percent(waste_factor)),
+        })
 
 
 class EstimateCsvExportView(LoginRequiredMixin, View):
@@ -765,7 +846,7 @@ class MaterialDeleteView(LoginRequiredMixin, View):
 
 class AssemblyQuickEditView(LoginRequiredMixin, View):
     """Powers the Library's quick-edit drawer: GET returns an assembly's rules
-    as JSON; POST applies per-rule material and waste changes.
+    as JSON; POST applies per-rule material and material-group changes.
 
     Copy-on-write: a global (seeded) assembly is never mutated. Posting edits
     against one clones it into the account's library as '<name> (Custom)' with
@@ -792,7 +873,7 @@ class AssemblyQuickEditView(LoginRequiredMixin, View):
                     'role': rule.role,
                     'kind': (rule.formula.name if rule.formula_id else rule.get_formula_kind_display()),
                     'material_id': rule.material_id,
-                    'waste_factor': str(rule.waste_factor),
+                    'material_group_id': rule.material_group_id,
                 }
                 for rule in assembly.rules.all().order_by('order')
             ],
@@ -815,20 +896,21 @@ class AssemblyQuickEditView(LoginRequiredMixin, View):
         visible_material_ids = set(
             MaterialProduct.objects.visible_to(account).values_list('id', flat=True)
         )
+        valid_group_ids = set(MaterialGroup.objects.values_list('id', flat=True))
         validated = {}
         for rule_id, edit in edits.items():
             if rule_id not in source_rules:
                 return JsonResponse({'error': 'Unknown rule for this assembly.'}, status=400)
             try:
                 material_id = int(edit['material_id'])
-                waste = Decimal(str(edit['waste_factor']))
-            except (KeyError, TypeError, ValueError, ArithmeticError):
+                material_group_id = int(edit['material_group_id']) if edit.get('material_group_id') else None
+            except (KeyError, TypeError, ValueError):
                 return JsonResponse({'error': 'Invalid rule edit.'}, status=400)
             if material_id not in visible_material_ids:
                 return JsonResponse({'error': 'Invalid material.'}, status=400)
-            if not (Decimal('0') <= waste <= Decimal('1')):
-                return JsonResponse({'error': 'Waste factor must be between 0 and 100 percent.'}, status=400)
-            validated[rule_id] = {'material_id': material_id, 'waste_factor': waste}
+            if material_group_id is not None and material_group_id not in valid_group_ids:
+                return JsonResponse({'error': 'Invalid material group.'}, status=400)
+            validated[rule_id] = {'material_id': material_id, 'material_group_id': material_group_id}
 
         with transaction.atomic():
             if assembly.account_id is None:
@@ -838,8 +920,8 @@ class AssemblyQuickEditView(LoginRequiredMixin, View):
                 for rule_id, edit in validated.items():
                     rule = source_rules[rule_id]
                     rule.material_id = edit['material_id']
-                    rule.waste_factor = edit['waste_factor']
-                    rule.save(update_fields=['material', 'waste_factor'])
+                    rule.material_group_id = edit['material_group_id']
+                    rule.save(update_fields=['material', 'material_group'])
 
         return JsonResponse({'id': saved.pk, 'name': saved.name, 'cloned': cloned})
 
@@ -883,7 +965,8 @@ class AssemblyQuickEditView(LoginRequiredMixin, View):
                     t_backer_stud_count=rule.t_backer_stud_count,
                     order=rule.order,
                     material_id=edit.get('material_id', rule.material_id),
-                    waste_factor=edit.get('waste_factor', rule.waste_factor),
+                    material_group_id=edit.get('material_group_id', rule.material_group_id),
+                    waste_factor=rule.waste_factor,
                 )
         else:
             clone_rules = {(r.order, r.role): r for r in clone.rules.all()}
@@ -892,8 +975,8 @@ class AssemblyQuickEditView(LoginRequiredMixin, View):
                 target = clone_rules.get((source_rule.order, source_rule.role))
                 if target is not None:
                     target.material_id = edit['material_id']
-                    target.waste_factor = edit['waste_factor']
-                    target.save(update_fields=['material', 'waste_factor'])
+                    target.material_group_id = edit['material_group_id']
+                    target.save(update_fields=['material', 'material_group'])
         return clone, created
 
 
@@ -960,6 +1043,9 @@ class LibraryView(LoginRequiredMixin, TemplateView):
         # Flat alphabetized list for the quick-edit drawer's material selects.
         context['materials_flat'] = sorted(
             ({'id': m.id, 'name': m.name} for m in materials), key=lambda m: m['name'].lower(),
+        )
+        context['material_groups_flat'] = list(
+            MaterialGroup.objects.values('id', 'name').order_by('display_order', 'name')
         )
         context['assembly_groups'] = assembly_groups
         context['assembly_count'] = len(assemblies)

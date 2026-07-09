@@ -12,7 +12,7 @@ from plans.models import Trace
 from plans.test_traces import make_plan_page
 from projects.models import Estimate, Project
 
-from .models import LineItem
+from .models import LineItem, MaterialGroup
 
 User = get_user_model()
 
@@ -82,6 +82,28 @@ class EstimateDetailViewTests(TestCase):
         response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
         self.assertContains(response, 'Download CSV')
         self.assertContains(response, 'Print-friendly view')
+
+    def test_group_waste_editor_renders_for_grouped_tool_line(self):
+        group, _ = MaterialGroup.objects.get_or_create(
+            name='Exterior Studs', defaults={'default_waste_factor': Decimal('0.10')},
+        )
+        item = LineItem.objects.create(
+            estimate=self.estimate_a,
+            material=self.material,
+            material_group=group,
+            role='Stud',
+            quantity=9,
+            waste_factor=Decimal('0.10'),
+            source=LineItem.Source.TOOL,
+        )
+
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-detail', args=[self.estimate_a.pk]))
+        self.assertContains(response, 'Exterior Studs')
+        self.assertContains(
+            response,
+            reverse('estimating:estimate-material-group-waste', args=[self.estimate_a.pk, group.pk]),
+        )
 
 
 class EstimateMaterialSummaryViewTests(TestCase):
@@ -155,6 +177,102 @@ class EstimateMaterialSummaryViewTests(TestCase):
         self.client.force_login(self.user_a)
         response = self.client.get(reverse('estimating:estimate-material-summary', args=[self.estimate_a.pk]))
         self.assertNotContains(response, 'mat-summary-stats')
+
+    def test_summary_shows_material_group_and_waste_editor(self):
+        group, _ = MaterialGroup.objects.get_or_create(
+            name='Wall Sheathing', defaults={'default_waste_factor': Decimal('0.10')},
+        )
+        LineItem.objects.create(
+            estimate=self.estimate_a,
+            material=self.material,
+            material_group=group,
+            role='Sheathing',
+            quantity=12,
+            waste_factor=Decimal('0.10'),
+            source=LineItem.Source.TOOL,
+        )
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-material-summary', args=[self.estimate_a.pk]))
+        self.assertContains(response, 'Group: Wall Sheathing')
+        self.assertContains(
+            response,
+            reverse('estimating:estimate-material-group-waste', args=[self.estimate_a.pk, group.pk]),
+        )
+
+
+class EstimateMaterialGroupWasteUpdateViewTests(TestCase):
+    def setUp(self):
+        from estimating.models import Assembly, CalculationRule
+
+        self.user = User.objects.create_user(email='waste@example.com', password='testpass123')
+        self.project = Project.objects.create(account=self.user.account, name='Waste House')
+        self.estimate = Estimate.objects.create(project=self.project)
+        self.material = MaterialProduct.objects.create(
+            name='Waste Stud', input_type=MaterialProduct.InputType.FT,
+        )
+        MaterialLength.objects.create(product=self.material, length_ft=Decimal('8'), is_default=True)
+        self.group, _ = MaterialGroup.objects.get_or_create(
+            name='Exterior Studs', defaults={'default_waste_factor': Decimal('0.10')},
+        )
+        self.assembly = Assembly.objects.create(
+            account=self.user.account, name='Waste Wall', tool_type='line', category='wall_system',
+            wall_subtype='exterior',
+        )
+        self.rule = CalculationRule.objects.create(
+            assembly=self.assembly,
+            material=self.material,
+            material_group=self.group,
+            role='Stud',
+            formula_kind=CalculationRule.FormulaKind.PER_SPACING,
+            extra=1,
+            waste_factor=Decimal('0.10'),
+            order=1,
+        )
+        self.page = make_plan_page(self.project, label='Waste Page')
+        self.page.scale_pixels_per_foot = Decimal('10')
+        self.page.save(update_fields=['scale_pixels_per_foot'])
+        self.trace = Trace.objects.create(
+            plan_page=self.page,
+            tool_type=Trace.ToolType.LINE,
+            geometry=[{'x': 0, 'y': 0}, {'x': 100, 'y': 0}],
+            assembly=self.assembly,
+            settings={'stud_spacing_in': 16, 'wall_height_in': 96},
+        )
+        LineItem.objects.create(
+            estimate=self.estimate,
+            trace=self.trace,
+            calculation_rule=self.rule,
+            material=self.material,
+            material_group=self.group,
+            role='Stud',
+            quantity=9,
+            waste_factor=Decimal('0.10'),
+            source=LineItem.Source.TOOL,
+        )
+        self.client.force_login(self.user)
+
+    def test_updates_estimate_group_waste_and_recalculates_linked_traces(self):
+        response = self.client.post(
+            reverse('estimating:estimate-material-group-waste', args=[self.estimate.pk, self.group.pk]),
+            data=json.dumps({'waste_percent': '20'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        item = LineItem.objects.get(estimate=self.estimate, trace=self.trace)
+        self.assertEqual(item.material_group_id, self.group.pk)
+        self.assertEqual(item.waste_factor, Decimal('0.200'))
+        self.assertEqual(item.quantity, 11)
+
+    def test_requires_same_account_estimate(self):
+        other = User.objects.create_user(email='waste-other@example.com', password='testpass123')
+        other_project = Project.objects.create(account=other.account, name='Other Waste House')
+        other_estimate = Estimate.objects.create(project=other_project)
+        response = self.client.post(
+            reverse('estimating:estimate-material-group-waste', args=[other_estimate.pk, self.group.pk]),
+            data=json.dumps({'waste_percent': '20'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 class EstimateCsvExportViewTests(TestCase):
@@ -458,7 +576,7 @@ class MaterialLibraryManagementTests(TestCase):
 
 class AssemblyQuickEditTests(TestCase):
     """The Library drawer endpoint. Copy-on-write on global assemblies; edits
-    in place on account-owned ones; strict validation of materials and waste."""
+    in place on account-owned ones; strict validation of materials and groups."""
 
     def setUp(self):
         from estimating.models import Assembly, CalculationRule
@@ -471,6 +589,12 @@ class AssemblyQuickEditTests(TestCase):
         self.material_alt = MaterialProduct.objects.create(
             name='QE 2x8', input_type=MaterialProduct.InputType.FT, nominal_dimension='2x8',
         )
+        self.group, _ = MaterialGroup.objects.get_or_create(
+            name='Exterior Studs', defaults={'default_waste_factor': Decimal('0.10')},
+        )
+        self.group_alt, _ = MaterialGroup.objects.get_or_create(
+            name='Exterior Plates', defaults={'default_waste_factor': Decimal('0.05')},
+        )
         self.foreign_material = MaterialProduct.objects.create(
             account=self.other.account, name='QE Foreign', input_type=MaterialProduct.InputType.FT,
         )
@@ -480,7 +604,7 @@ class AssemblyQuickEditTests(TestCase):
         self.rule = CalculationRule.objects.create(
             assembly=self.global_assembly, material=self.material, role='Stud',
             formula_kind=CalculationRule.FormulaKind.PER_SPACING, order=1,
-            waste_factor=Decimal('0.05'),
+            material_group=self.group, waste_factor=Decimal('0.05'),
         )
         self.client.force_login(self.user)
 
@@ -499,12 +623,13 @@ class AssemblyQuickEditTests(TestCase):
         self.assertTrue(data['is_global'])
         self.assertEqual(data['rules'][0]['role'], 'Stud')
         self.assertEqual(data['rules'][0]['material_id'], self.material.pk)
+        self.assertEqual(data['rules'][0]['material_group_id'], self.group.pk)
 
     def test_editing_global_assembly_clones_into_account(self):
         from estimating.models import Assembly
 
         response = self._post(self.global_assembly, [
-            {'id': self.rule.pk, 'material_id': self.material_alt.pk, 'waste_factor': '0.100'},
+            {'id': self.rule.pk, 'material_id': self.material_alt.pk, 'material_group_id': self.group_alt.pk},
         ])
         data = response.json()
         self.assertTrue(data['cloned'])
@@ -514,20 +639,20 @@ class AssemblyQuickEditTests(TestCase):
         self.assertFalse(clone.is_default)
         clone_rule = clone.rules.get()
         self.assertEqual(clone_rule.material_id, self.material_alt.pk)
-        self.assertEqual(clone_rule.waste_factor, Decimal('0.100'))
+        self.assertEqual(clone_rule.material_group_id, self.group_alt.pk)
         # The global source is untouched for every other tenant.
         self.rule.refresh_from_db()
         self.assertEqual(self.rule.material_id, self.material.pk)
-        self.assertEqual(self.rule.waste_factor, Decimal('0.050'))
+        self.assertEqual(self.rule.material_group_id, self.group.pk)
 
     def test_second_edit_reuses_the_clone(self):
         from estimating.models import Assembly
 
         first = self._post(self.global_assembly, [
-            {'id': self.rule.pk, 'material_id': self.material_alt.pk, 'waste_factor': '0.100'},
+            {'id': self.rule.pk, 'material_id': self.material_alt.pk, 'material_group_id': self.group_alt.pk},
         ]).json()
         second = self._post(self.global_assembly, [
-            {'id': self.rule.pk, 'material_id': self.material.pk, 'waste_factor': '0.150'},
+            {'id': self.rule.pk, 'material_id': self.material.pk, 'material_group_id': self.group.pk},
         ]).json()
         self.assertFalse(second['cloned'])
         self.assertEqual(first['id'], second['id'])
@@ -535,7 +660,7 @@ class AssemblyQuickEditTests(TestCase):
             Assembly.objects.filter(account=self.user.account, name__startswith='QE Global Wall').count(), 1,
         )
         clone_rule = Assembly.objects.get(pk=second['id']).rules.get()
-        self.assertEqual(clone_rule.waste_factor, Decimal('0.150'))
+        self.assertEqual(clone_rule.material_group_id, self.group.pk)
 
     def test_editing_owned_assembly_updates_in_place(self):
         from estimating.models import Assembly, CalculationRule
@@ -548,19 +673,20 @@ class AssemblyQuickEditTests(TestCase):
             formula_kind=CalculationRule.FormulaKind.PER_STOCK_LENGTH, order=1,
         )
         response = self._post(owned, [
-            {'id': owned_rule.pk, 'material_id': self.material_alt.pk, 'waste_factor': '0.050'},
+            {'id': owned_rule.pk, 'material_id': self.material_alt.pk, 'material_group_id': self.group_alt.pk},
         ])
         self.assertFalse(response.json()['cloned'])
         owned_rule.refresh_from_db()
         self.assertEqual(owned_rule.material_id, self.material_alt.pk)
+        self.assertEqual(owned_rule.material_group_id, self.group_alt.pk)
 
-    def test_rejects_foreign_material_and_bad_waste(self):
+    def test_rejects_foreign_material_and_bad_group(self):
         response = self._post(self.global_assembly, [
-            {'id': self.rule.pk, 'material_id': self.foreign_material.pk, 'waste_factor': '0.100'},
+            {'id': self.rule.pk, 'material_id': self.foreign_material.pk, 'material_group_id': self.group.pk},
         ])
         self.assertEqual(response.status_code, 400)
         response = self._post(self.global_assembly, [
-            {'id': self.rule.pk, 'material_id': self.material.pk, 'waste_factor': '1.5'},
+            {'id': self.rule.pk, 'material_id': self.material.pk, 'material_group_id': 999999},
         ])
         self.assertEqual(response.status_code, 400)
 

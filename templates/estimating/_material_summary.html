@@ -82,6 +82,9 @@
                     {{ row.material__name }}
                     {% if row.role_label %}<span class="text-muted">&middot; {{ row.role_label }}</span>{% endif %}
                     {% if row.length_ft %}<span class="text-muted">&middot; {{ row.length_ft|floatformat:0 }} ft</span>{% endif %}
+                    {% if row.material_group_label %}
+                    <div class="small text-muted">Group: {{ row.material_group_label }}</div>
+                    {% endif %}
                     {% if row.visible_trace_count %}
                     <span class="badge rounded-pill text-bg-light border ms-1">{{ row.visible_trace_count }} trace{{ row.visible_trace_count|pluralize }}</span>
                     {% endif %}
@@ -103,7 +106,20 @@
                         <i class="bi bi-eye"></i>
                     </button>
                     {% endif %}
-                    {{ row.total_quantity }}
+                    <div>{{ row.total_quantity }}</div>
+                    {% if row.material_group_id %}
+                    <div class="input-group input-group-sm material-group-waste-editor mt-1">
+                        <input
+                            type="number"
+                            class="form-control material-group-waste-input text-end"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value="{{ row.waste_percent }}"
+                            data-update-url="{% url 'estimating:estimate-material-group-waste' estimate.pk row.material_group_id %}">
+                        <span class="input-group-text">% waste</span>
+                    </div>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}

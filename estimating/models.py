@@ -212,6 +212,20 @@ class Assembly(models.Model):
             raise ValidationError({'opening_kind': 'Only opening-tool_type assemblies can set opening_kind.'})
 
 
+class MaterialGroup(models.Model):
+    """Reusable estimator-facing grouping bucket used across systems/floors."""
+
+    name = models.CharField(max_length=100, unique=True)
+    default_waste_factor = models.DecimalField(max_digits=4, decimal_places=3, default=Decimal('0'))
+    display_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['display_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
 class CalculationRule(models.Model):
     """One formula within an Assembly: a material + how to convert a measured
     length into a quantity of that material."""
@@ -242,6 +256,9 @@ class CalculationRule(models.Model):
     )
     material = models.ForeignKey(
         'catalog.MaterialProduct', on_delete=models.PROTECT, related_name='calculation_rules',
+    )
+    material_group = models.ForeignKey(
+        MaterialGroup, on_delete=models.PROTECT, null=True, blank=True, related_name='calculation_rules',
     )
     role = models.CharField(max_length=100, help_text='e.g. "Stud", "Top Plate", "Bottom Plate" - shown on the BOM.')
     formula_kind = models.CharField(max_length=30, choices=FormulaKind.choices, blank=True)
@@ -320,6 +337,9 @@ class LineItem(models.Model):
     material = models.ForeignKey(
         'catalog.MaterialProduct', on_delete=models.PROTECT, related_name='line_items',
     )
+    material_group = models.ForeignKey(
+        MaterialGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name='line_items',
+    )
     role = models.CharField(max_length=100, blank=True)
     category = models.CharField(
         max_length=20, choices=Assembly.Category.choices, default=Assembly.Category.MISC,
@@ -342,3 +362,23 @@ class LineItem(models.Model):
 
     def __str__(self):
         return f'{self.quantity} x {self.material.name} ({self.role})'
+
+
+class EstimateMaterialGroup(models.Model):
+    """Estimate-specific waste override for a reusable material group."""
+
+    estimate = models.ForeignKey('projects.Estimate', on_delete=models.CASCADE, related_name='material_group_settings')
+    material_group = models.ForeignKey(MaterialGroup, on_delete=models.CASCADE, related_name='estimate_settings')
+    waste_factor = models.DecimalField(max_digits=4, decimal_places=3, default=Decimal('0'))
+
+    class Meta:
+        ordering = ['estimate', 'material_group']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['estimate', 'material_group'],
+                name='unique_estimate_material_group_setting',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.estimate_id}: {self.material_group.name} ({self.waste_factor})'

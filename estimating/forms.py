@@ -7,7 +7,7 @@ from django.utils.text import slugify
 from catalog.forms import MaterialProductInputMixin
 from catalog.models import MaterialLength, MaterialProduct
 
-from .models import Assembly, CalculationRule, Formula, LineItem
+from .models import Assembly, CalculationRule, Formula, LineItem, MaterialGroup
 
 
 class BootstrapFormMixin:
@@ -235,7 +235,7 @@ class CalculationRuleForm(BootstrapFormMixin, forms.ModelForm):
         model = CalculationRule
         fields = [
             'role', 'material', 'formula', 'formula_kind', 'multiplier',
-            'extra', 'coverage_sqft', 'units_per_measurement', 'waste_factor', 'order',
+            'extra', 'coverage_sqft', 'units_per_measurement', 'material_group', 'order',
             'corner_stud_count', 't_intersection_stud_count', 't_backer_stud_count',
         ]
 
@@ -243,8 +243,10 @@ class CalculationRuleForm(BootstrapFormMixin, forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields['material'].queryset = MaterialProduct.objects.visible_to(account)
         self.fields['formula'].queryset = Formula.objects.visible_to(account)
+        self.fields['material_group'].queryset = MaterialGroup.objects.all()
         self.fields['formula'].required = False
         self.fields['formula_kind'].required = False
+        self.fields['material_group'].required = False
 
 
 CalculationRuleFormSet = inlineformset_factory(

@@ -152,6 +152,7 @@
                         <th style="width: 2rem;"></th>
                         <th>Role</th>
                         <th>Material</th>
+                        <th>Group</th>
                         <th>Length (ft)</th>
                         <th class="text-end">Quantity</th>
                         <th>Waste</th>
@@ -165,9 +166,32 @@
                         <td class="drag-handle-item"><i class="bi bi-grip-vertical"></i></td>
                         <td>{{ item.role }}</td>
                         <td>{{ item.material.name }}</td>
+                        <td>
+                            {% if item.material_group_id %}
+                            <span class="small fw-semibold">{{ item.material_group.name }}</span>
+                            {% else %}
+                            <span class="text-muted small">Unassigned</span>
+                            {% endif %}
+                        </td>
                         <td>{% if item.length_ft %}{{ item.length_ft|floatformat:1 }}{% endif %}</td>
                         <td class="text-end">{{ item.quantity }}</td>
-                        <td>{{ item.waste_factor }}</td>
+                        <td>
+                            {% if item.material_group_id %}
+                            <div class="input-group input-group-sm material-group-waste-editor">
+                                <input
+                                    type="number"
+                                    class="form-control material-group-waste-input"
+                                    min="0"
+                                    max="100"
+                                    step="0.5"
+                                    value="{{ item.waste_percent }}"
+                                    data-update-url="{% url 'estimating:estimate-material-group-waste' estimate.pk item.material_group_id %}">
+                                <span class="input-group-text">%</span>
+                            </div>
+                            {% else %}
+                            <span class="text-muted small">{{ item.waste_percent }}%</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {{ item.get_source_display }}
                             {% if item.trace_id and item.trace.plan_page_id %}

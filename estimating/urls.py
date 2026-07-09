@@ -22,6 +22,11 @@ urlpatterns = [
         'estimates/<int:pk>/material-summary/', views.EstimateMaterialSummaryView.as_view(),
         name='estimate-material-summary',
     ),
+    path(
+        'estimates/<int:pk>/material-groups/<int:group_id>/waste/',
+        views.EstimateMaterialGroupWasteUpdateView.as_view(),
+        name='estimate-material-group-waste',
+    ),
     path('estimates/<int:pk>/print/', views.EstimatePrintView.as_view(), name='estimate-print'),
     path('estimates/<int:pk>/export.csv', views.EstimateCsvExportView.as_view(), name='estimate-csv'),
     path('estimates/<int:estimate_id>/lines/add/', views.ManualLineItemCreateView.as_view(), name='line-item-add'),

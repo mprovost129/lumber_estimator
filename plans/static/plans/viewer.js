@@ -291,6 +291,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     document.getElementById('material-list-content').addEventListener('click', function (event) {
+        if (event.target.closest('.material-group-waste-editor')) {
+            return;
+        }
         var toggle = event.target.closest('.mat-vis-toggle');
         if (!toggle) {
             return;
@@ -312,6 +315,9 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     document.getElementById('material-list-content').addEventListener('click', function (event) {
+        if (event.target.closest('.material-group-waste-editor')) {
+            return;
+        }
         var row = event.target.closest('.material-summary-row');
         if (!row) {
             return;
@@ -333,6 +339,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // highlights every traced element feeding that construction system on
     // this page, the same way a single material row does for its own rows.
     document.getElementById('material-list-content').addEventListener('click', function (event) {
+        if (event.target.closest('.material-group-waste-editor')) {
+            return;
+        }
         var header = event.target.closest('.material-summary-group-header');
         if (!header) {
             return;
@@ -385,6 +394,40 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         hoveredTraceIds = [];
         updateMaterialHoverState(null);
+    });
+
+    document.getElementById('material-list-content').addEventListener('change', function (event) {
+        var input = event.target.closest('.material-group-waste-input');
+        if (!input) {
+            return;
+        }
+        var wastePercent = parseFloat(input.value);
+        if (isNaN(wastePercent) || wastePercent < 0 || wastePercent > 100) {
+            refreshMaterialList();
+            return;
+        }
+        input.disabled = true;
+        fetch(input.dataset.updateUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken,
+            },
+            body: JSON.stringify({ waste_percent: wastePercent }),
+        })
+            .then(function (response) {
+                if (!response.ok) {
+                    throw new Error('Waste update failed.');
+                }
+                return response.json();
+            })
+            .then(function () {
+                refreshMaterialList();
+            })
+            .catch(function () {
+                input.disabled = false;
+                refreshMaterialList();
+            });
     });
 
     materialPageScopeButton.addEventListener('click', function () {
