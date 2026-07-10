@@ -50,3 +50,15 @@ class SignUpForm(forms.Form):
             password=self.cleaned_data['password1'],
             account=account,
         )
+
+
+class UserSettingsForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = ['keep_tool_active_after_draw']
+        labels = {
+            'keep_tool_active_after_draw': 'Keep the current drawing tool active after finishing a trace',
+        }
+        widgets = {
+            'keep_tool_active_after_draw': forms.CheckboxInput(attrs={'class': 'form-check-input'}),
+        }

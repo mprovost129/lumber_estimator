@@ -12,7 +12,7 @@ from django.views.generic import DetailView
 
 from catalog.models import MaterialProduct
 from estimating.calculations import generate_line_items
-from estimating.models import Assembly, LineItem
+from estimating.models import Assembly, LineItem, LoadType
 from projects.models import JobSettings, Project
 
 from .forms import PlanUploadForm
@@ -50,6 +50,15 @@ def _resolve_assembly(account, assembly_id, tool_type, settings=None):
     if assembly is None:
         return None, 'Invalid assembly.'
     return assembly, None
+
+
+def _resolve_load_type(account, load_type_id):
+    if not load_type_id:
+        return None, None
+    load_type = LoadType.objects.visible_to(account).filter(pk=load_type_id).first()
+    if load_type is None:
+        return None, 'Invalid load type.'
+    return load_type, None
 
 
 def _resolve_parent_wall(account, parent_wall_id, page, tool_type):
@@ -174,6 +183,8 @@ def _trace_payload(trace, measurement=None):
         'color': trace.color,
         'material_id': trace.material_id,
         'material_name': trace.material.name if trace.material else None,
+        'load_type_id': trace.load_type_id,
+        'load_type_name': trace.load_type.name if trace.load_type else None,
         'assembly_id': trace.assembly_id,
         'assembly_name': trace.assembly.name if trace.assembly else None,
         'parent_wall_id': trace.parent_wall_id,
@@ -219,6 +230,10 @@ def _update_trace_from_payload(account, trace, payload):
     if error:
         return None, error
 
+    load_type, error = _resolve_load_type(account, payload.get('load_type_id'))
+    if error:
+        return None, error
+
     assembly = None
     if trace.tool_type == Trace.ToolType.OPENING:
         candidate_wall = _peek_parent_wall(account, payload.get('parent_wall_id'), trace.plan_page)
@@ -250,8 +265,9 @@ def _update_trace_from_payload(account, trace, payload):
     measurement = None
     try:
         with transaction.atomic():
-            update_fields = ['material', 'assembly', 'parent_wall', 'settings', 'color']
+            update_fields = ['material', 'load_type', 'assembly', 'parent_wall', 'settings', 'color']
             trace.material = material
+            trace.load_type = load_type
             trace.assembly = assembly
             trace.parent_wall = parent_wall
             trace.settings = settings_data
@@ -422,7 +438,8 @@ class PlanViewerView(LoginRequiredMixin, DetailView):
         materials = MaterialProduct.objects.visible_to(account)
         assemblies = Assembly.objects.visible_to(account)
         presets = ToolPreset.objects.filter(account=account)
-        traces = page.traces.select_related('material', 'assembly')
+        load_types = LoadType.objects.visible_to(account)
+        traces = page.traces.select_related('material', 'load_type', 'assembly')
 
         walls = page.traces.filter(tool_type__in=[Trace.ToolType.LINE, Trace.ToolType.POLYLINE])
         estimate = page.plan.project.get_or_create_estimate()
@@ -444,15 +461,18 @@ class PlanViewerView(LoginRequiredMixin, DetailView):
             'default_stud_spacing_in': default_stud_spacing_in,
             'default_wall_height_in': default_wall_height_in,
             'is_calibrated': page.scale_pixels_per_foot is not None,
+            'keep_tool_active_after_draw': self.request.user.keep_tool_active_after_draw,
             'traces': list(traces.values(
-                'id', 'tool_type', 'geometry', 'settings', 'color', 'material_id', 'assembly_id', 'parent_wall_id',
+                'id', 'tool_type', 'geometry', 'settings', 'color', 'material_id', 'load_type_id',
+                'assembly_id', 'parent_wall_id',
             )),
             'materials_data': list(materials.values('id', 'name', 'input_type')),
+            'load_types_data': list(load_types.values('id', 'name')),
             'assemblies_data': list(assemblies.values(
                 'id', 'name', 'tool_type', 'category', 'wall_subtype', 'opening_kind', 'beam_type', 'is_default',
             )),
             'presets_data': list(presets.values(
-                'id', 'name', 'tool_type', 'material_id', 'settings', 'color',
+                'id', 'name', 'tool_type', 'material_id', 'load_type_id', 'settings', 'color',
             )),
             'walls_data': list(walls.values('id', 'tool_type')),
         })
@@ -494,6 +514,9 @@ class TraceCreateView(LoginRequiredMixin, View):
         material, error = _resolve_material(account, material_id)
         if error:
             return JsonResponse({'error': error}, status=400)
+        load_type, error = _resolve_load_type(account, payload.get('load_type_id'))
+        if error:
+            return JsonResponse({'error': error}, status=400)
 
         assembly = None
         if tool_type == Trace.ToolType.OPENING:
@@ -517,7 +540,7 @@ class TraceCreateView(LoginRequiredMixin, View):
             with transaction.atomic():
                 trace = Trace.objects.create(
                     plan_page=page, tool_type=tool_type, geometry=geometry,
-                    material=material, assembly=assembly, parent_wall=parent_wall,
+                    material=material, load_type=load_type, assembly=assembly, parent_wall=parent_wall,
                     settings=settings_data, color=color,
                 )
                 if page.scale_pixels_per_foot is not None or not needs_scale:
@@ -589,11 +612,12 @@ class TraceBatchUpdateView(LoginRequiredMixin, View):
             return JsonResponse({'error': 'One or more traces were not found.'}, status=404)
 
         apply_material = bool(payload.get('apply_material'))
+        apply_load_type = bool(payload.get('apply_load_type'))
         apply_assembly = bool(payload.get('apply_assembly'))
         apply_color = bool(payload.get('apply_color'))
         apply_settings = bool(payload.get('apply_settings'))
 
-        if not any([apply_material, apply_assembly, apply_color, apply_settings]):
+        if not any([apply_material, apply_load_type, apply_assembly, apply_color, apply_settings]):
             return JsonResponse({'error': 'No batch changes were requested.'}, status=400)
 
         tool_types = {trace.tool_type for trace in traces}
@@ -606,6 +630,7 @@ class TraceBatchUpdateView(LoginRequiredMixin, View):
             for trace in traces:
                 trace_payload = {
                     'material_id': payload.get('material_id') if apply_material else trace.material_id,
+                    'load_type_id': payload.get('load_type_id') if apply_load_type else trace.load_type_id,
                     'assembly_id': payload.get('assembly_id') if apply_assembly else trace.assembly_id,
                     'parent_wall_id': payload.get('parent_wall_id') if first_tool_type == Trace.ToolType.OPENING and apply_settings else trace.parent_wall_id,
                     'color': payload.get('color') if apply_color else trace.color,
@@ -697,7 +722,7 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         tool_type = request.GET.get('tool_type', Trace.ToolType.LINE)
         presets = ToolPreset.objects.filter(account=request.user.account, tool_type=tool_type)
         return JsonResponse({'presets': list(
-            presets.values('id', 'name', 'material_id', 'assembly_id', 'settings', 'color', 'is_favorite'),
+            presets.values('id', 'name', 'material_id', 'load_type_id', 'assembly_id', 'settings', 'color', 'is_favorite'),
         )})
 
     def post(self, request):
@@ -710,6 +735,7 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         name = (payload.get('name') or '').strip()
         tool_type = payload.get('tool_type')
         material_id = payload.get('material_id')
+        load_type_id = payload.get('load_type_id')
         assembly_id = payload.get('assembly_id')
         settings_data = payload.get('settings') or {}
         color = payload.get('color') or ''
@@ -722,6 +748,9 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
         material, error = _resolve_material(account, material_id)
         if error:
             return JsonResponse({'error': error}, status=400)
+        load_type, error = _resolve_load_type(account, load_type_id)
+        if error:
+            return JsonResponse({'error': error}, status=400)
         assembly, error = _resolve_assembly(account, assembly_id, tool_type, settings_data)
         if error:
             return JsonResponse({'error': error}, status=400)
@@ -731,12 +760,19 @@ class ToolPresetListCreateView(LoginRequiredMixin, View):
 
         preset, created = ToolPreset.objects.update_or_create(
             account=account, tool_type=tool_type, name=name,
-            defaults={'material': material, 'assembly': assembly, 'settings': settings_data, 'color': color},
+            defaults={
+                'material': material,
+                'load_type': load_type,
+                'assembly': assembly,
+                'settings': settings_data,
+                'color': color,
+            },
         )
         return JsonResponse({
             'id': preset.id,
             'name': preset.name,
             'material_id': preset.material_id,
+            'load_type_id': preset.load_type_id,
             'assembly_id': preset.assembly_id,
             'settings': preset.settings,
             'color': preset.color,

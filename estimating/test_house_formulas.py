@@ -33,7 +33,7 @@ class HouseFormulaTests(TestCase):
 
     def test_per_length_cuts_to_smallest_covering_stock(self):
         rule = self._rule(formula_kind=Kind.PER_LENGTH, multiplier=2)
-        quantity, length = evaluate_rule(rule, {'length_ft': Decimal('13.2')}, {})
+        quantity, length, _ = evaluate_rule(rule, {'length_ft': Decimal('13.2')}, {})
         self.assertEqual(quantity, 2)
         self.assertEqual(length, 14)  # smallest stock covering 13.2 ft
 
@@ -42,7 +42,7 @@ class HouseFormulaTests(TestCase):
         # spaced up the 12 ft depth at 16" OC -> ceil(144/16)+1 = 10 members.
         rule = self._rule(formula_kind=Kind.PER_AREA_SPACING)
         measurement = {'bbox_width_ft': Decimal('24'), 'bbox_height_ft': Decimal('12')}
-        quantity, length = evaluate_rule(rule, measurement, {'spacing_in': 16})
+        quantity, length, _ = evaluate_rule(rule, measurement, {'spacing_in': 16})
         self.assertEqual(quantity, 10)
         self.assertEqual(length, 24)
 
@@ -51,14 +51,14 @@ class HouseFormulaTests(TestCase):
         # at 16" OC -> ceil(288/16)+1 = 19 members.
         rule = self._rule(formula_kind=Kind.PER_AREA_SPACING)
         measurement = {'bbox_width_ft': Decimal('24'), 'bbox_height_ft': Decimal('12')}
-        quantity, length = evaluate_rule(rule, measurement, {'spacing_in': 16, 'member_direction': 'vertical'})
+        quantity, length, _ = evaluate_rule(rule, measurement, {'spacing_in': 16, 'member_direction': 'vertical'})
         self.assertEqual(quantity, 19)
         self.assertEqual(length, 12)
 
     def test_per_area_coverage_sheets(self):
         # 288 sqft / 32 sqft per sheet = 9 sheets
         rule = self._rule(formula_kind=Kind.PER_AREA_COVERAGE, material=self.sheet, coverage_sqft=Decimal('32'))
-        quantity, length = evaluate_rule(rule, {'area_sqft': Decimal('288')}, {})
+        quantity, length, _ = evaluate_rule(rule, {'area_sqft': Decimal('288')}, {})
         self.assertEqual(quantity, 9)
         self.assertIsNone(length)
 
@@ -69,33 +69,33 @@ class HouseFormulaTests(TestCase):
 
     def test_per_count(self):
         rule = self._rule(formula_kind=Kind.PER_COUNT, material=self.sheet, multiplier=2)
-        quantity, length = evaluate_rule(rule, {'count': 5}, {})
+        quantity, length, _ = evaluate_rule(rule, {'count': 5}, {})
         self.assertEqual(quantity, 10)
         self.assertIsNone(length)
 
     def test_header_adds_bearing_and_rounds_to_stock(self):
         # 6 ft opening + 0.25 ft bearing = 6.25 ft -> 8 ft stock, double header
         rule = self._rule(formula_kind=Kind.HEADER, multiplier=2)
-        quantity, length = evaluate_rule(rule, {'length_ft': Decimal('6')}, {})
+        quantity, length, _ = evaluate_rule(rule, {'length_ft': Decimal('6')}, {})
         self.assertEqual(quantity, 2)
         self.assertEqual(length, 8)
 
     def test_fixed_count(self):
         rule = self._rule(formula_kind=Kind.FIXED_COUNT, multiplier=2)
-        quantity, length = evaluate_rule(rule, {'length_ft': Decimal('6')}, {})
+        quantity, length, _ = evaluate_rule(rule, {'length_ft': Decimal('6')}, {})
         self.assertEqual(quantity, 2)
         self.assertIsNone(length)
 
     def test_per_spacing_sets_stud_length_from_wall_height(self):
         rule = self._rule(formula_kind=Kind.PER_SPACING, extra=1)
-        quantity, length = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16, 'wall_height_in': 108})
+        quantity, length, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16, 'wall_height_in': 108})
         self.assertEqual(quantity, 16)
         self.assertEqual(length, 10)  # 108 in = 9 ft -> smallest stock is 10 ft
 
     def test_per_stock_length_uses_perimeter_for_areas(self):
         # Rim board around a 24x12 deck: 72 ft perimeter / 16 ft default = 5 pieces
         rule = self._rule(formula_kind=Kind.PER_STOCK_LENGTH, multiplier=1)
-        quantity, length = evaluate_rule(rule, {'perimeter_ft': Decimal('72')}, {})
+        quantity, length, _ = evaluate_rule(rule, {'perimeter_ft': Decimal('72')}, {})
         self.assertEqual(quantity, 5)
         self.assertEqual(length, 16)
 

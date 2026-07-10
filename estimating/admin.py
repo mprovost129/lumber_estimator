@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Assembly, CalculationRule, Formula, LineItem
+from .models import Assembly, CalculationRule, Formula, LineItem, LoadType
 
 
 class CalculationRuleInline(admin.TabularInline):
@@ -25,5 +25,12 @@ class FormulaAdmin(admin.ModelAdmin):
 
 @admin.register(LineItem)
 class LineItemAdmin(admin.ModelAdmin):
-    list_display = ('__str__', 'estimate', 'category', 'source', 'quantity', 'material', 'created_at')
-    list_filter = ('category', 'source', 'material')
+    list_display = ('__str__', 'estimate', 'load_type', 'category', 'source', 'quantity', 'material', 'created_at')
+    list_filter = ('load_type', 'category', 'source', 'material')
+
+
+@admin.register(LoadType)
+class LoadTypeAdmin(admin.ModelAdmin):
+    list_display = ('name', 'display_order', 'account')
+    list_filter = ('account',)
+    search_fields = ('name',)

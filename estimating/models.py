@@ -226,6 +226,41 @@ class MaterialGroup(models.Model):
         return self.name
 
 
+class LoadTypeQuerySet(models.QuerySet):
+    def visible_to(self, account):
+        return self.filter(models.Q(account__isnull=True) | models.Q(account=account))
+
+
+class LoadType(models.Model):
+    """Estimator-facing bucket like "First Floor System" or "Roof System"."""
+
+    account = models.ForeignKey(
+        'accounts.Account', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='custom_load_types',
+        help_text='Leave blank for a global load type available to every account.',
+    )
+    name = models.CharField(max_length=120)
+    display_order = models.PositiveSmallIntegerField(default=0)
+
+    objects = LoadTypeQuerySet.as_manager()
+
+    class Meta:
+        ordering = ['display_order', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['name'], condition=models.Q(account__isnull=True),
+                name='unique_global_load_type_name',
+            ),
+            models.UniqueConstraint(
+                fields=['account', 'name'], condition=models.Q(account__isnull=False),
+                name='unique_account_load_type_name',
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class CalculationRule(models.Model):
     """One formula within an Assembly: a material + how to convert a measured
     length into a quantity of that material."""
@@ -259,6 +294,15 @@ class CalculationRule(models.Model):
     )
     material_group = models.ForeignKey(
         MaterialGroup, on_delete=models.PROTECT, null=True, blank=True, related_name='calculation_rules',
+    )
+    preferred_length = models.ForeignKey(
+        'catalog.MaterialLength', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='preferred_by_rules',
+        help_text=(
+            'Pin this rule to always use this exact stock length, regardless of the '
+            'measured run. Leave blank to auto-resolve at calculation time (smallest '
+            'length that fits / material default / spliced from the longest length).'
+        ),
     )
     role = models.CharField(max_length=100, help_text='e.g. "Stud", "Top Plate", "Bottom Plate" - shown on the BOM.')
     formula_kind = models.CharField(max_length=30, choices=FormulaKind.choices, blank=True)
@@ -318,6 +362,8 @@ class CalculationRule(models.Model):
                 raise ValidationError({'formula': 'This formula is not available to the assembly account.'})
             if self.assembly.tool_type not in self.formula.supported_tool_types:
                 raise ValidationError({'formula': 'This formula does not support the assembly tool type.'})
+        if self.preferred_length_id and self.material_id and self.preferred_length.product_id != self.material_id:
+            raise ValidationError({'preferred_length': 'Preferred length must belong to the selected material.'})
 
 
 class LineItem(models.Model):
@@ -340,6 +386,9 @@ class LineItem(models.Model):
     material_group = models.ForeignKey(
         MaterialGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name='line_items',
     )
+    load_type = models.ForeignKey(
+        LoadType, on_delete=models.SET_NULL, null=True, blank=True, related_name='line_items',
+    )
     role = models.CharField(max_length=100, blank=True)
     category = models.CharField(
         max_length=20, choices=Assembly.Category.choices, default=Assembly.Category.MISC,
@@ -350,6 +399,11 @@ class LineItem(models.Model):
             'lines have no rule/assembly at all - read via Coalesce(calculation_rule__assembly__'
             'category, category) wherever grouping/order needs to reflect a later assembly edit.'
         ),
+    )
+    stock_length = models.ForeignKey(
+        'catalog.MaterialLength', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='line_items',
+        help_text='The specific catalog stock length used for this line (FT materials only).',
     )
     length_ft = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     quantity = models.PositiveIntegerField()
@@ -362,6 +416,10 @@ class LineItem(models.Model):
 
     def __str__(self):
         return f'{self.quantity} x {self.material.name} ({self.role})'
+
+    def clean(self):
+        if self.stock_length_id and self.material_id and self.stock_length.product_id != self.material_id:
+            raise ValidationError({'stock_length': 'Stock length must belong to the selected material.'})
 
 
 class EstimateMaterialGroup(models.Model):

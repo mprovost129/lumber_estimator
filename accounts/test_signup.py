@@ -166,3 +166,27 @@ class EmailVerificationTests(TestCase):
         # create_user calls (post-migration) start unverified by design.
         user = User.objects.create_user(email='old-timer@example.com', password='irrelevant-pass-9')
         self.assertFalse(user.email_verified)
+
+
+class UserSettingsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='settings@example.com', password='irrelevant-pass-9')
+
+    def test_settings_page_requires_login(self):
+        response = self.client.get(reverse('accounts:settings'))
+        self.assertEqual(response.status_code, 302)
+
+    def test_settings_page_renders_and_saves_tool_behavior(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse('accounts:settings'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Keep the current drawing tool active')
+
+        response = self.client.post(
+            reverse('accounts:settings'),
+            {},
+            follow=True,
+        )
+        self.assertContains(response, 'Your user settings were saved.')
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.keep_tool_active_after_draw)

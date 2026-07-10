@@ -129,36 +129,48 @@ class MaterialProduct(models.Model):
             raise ValueError(f'{self} is not a box-input material.')
         return math.ceil(quantity / self.quantity_per_box)
 
-    def stock_length_for(self, required_length_ft):
-        """Smallest in-stock length that covers `required_length_ft`. Feet materials only."""
+    def stock_length_row_for(self, required_length_ft):
+        """Smallest MaterialLength that covers `required_length_ft`. Feet materials only."""
         if not self.supports_input_type(self.InputType.FT):
             raise ValueError(f'{self} is not a feet-input material.')
         length = self.lengths.filter(length_ft__gte=required_length_ft).order_by('length_ft').first()
         if length is None:
             raise ValueError(f'No stock length of {self} covers {required_length_ft} ft.')
-        return length.length_ft
+        return length
+
+    def stock_length_for(self, required_length_ft):
+        """Smallest in-stock length that covers `required_length_ft`. Feet materials only."""
+        return self.stock_length_row_for(required_length_ft).length_ft
 
     @property
-    def default_length_ft(self):
-        """The stock length used for total-length / default-length quantity
+    def default_length_row(self):
+        """The MaterialLength used for total-length / default-length quantity
         calculations (e.g. how many plate pieces cover a wall run). Feet materials only."""
         if not self.supports_input_type(self.InputType.FT):
             raise ValueError(f'{self} is not a feet-input material.')
         default = self.lengths.filter(is_default=True).first()
         if default is None:
             raise ValueError(f'{self} has no default stock length set.')
-        return default.length_ft
+        return default
 
     @property
-    def max_length_ft(self):
-        """The longest in-stock length. Feet materials only. Used to decide
+    def default_length_ft(self):
+        return self.default_length_row.length_ft
+
+    @property
+    def max_length_row(self):
+        """The longest in-stock MaterialLength. Feet materials only. Used to decide
         whether a member has to be spliced from more than one stock piece."""
         if not self.supports_input_type(self.InputType.FT):
             raise ValueError(f'{self} is not a feet-input material.')
         longest = self.lengths.order_by('-length_ft').first()
         if longest is None:
             raise ValueError(f'{self} has no stock lengths set.')
-        return longest.length_ft
+        return longest
+
+    @property
+    def max_length_ft(self):
+        return self.max_length_row.length_ft
 
     def pieces_for_length(self, required_length_ft):
         """Stock pieces needed to build ONE member of `required_length_ft`,

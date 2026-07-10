@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block title %}New Assembly{% endblock %}
 
@@ -73,9 +74,11 @@
         </div>
     </div>
 </template>
+{{ material_lengths_data|json_script:"material-lengths-data" }}
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'estimating/material_length_filter.js' %}"></script>
 <script>
 document.getElementById('add-rule').addEventListener('click', function () {
     const total = document.getElementById('id_rules-TOTAL_FORMS');
@@ -115,6 +118,17 @@ function updateKindFields(row, kind) {
 }
 
 function initRuleRow(row) {
+    var materialWrap = fieldWrap(row, 'material');
+    var lengthWrap = fieldWrap(row, 'preferred_length');
+    var materialSelect = materialWrap && materialWrap.querySelector('select');
+    var lengthSelect = lengthWrap && lengthWrap.querySelector('select');
+    if (materialSelect && lengthSelect && window.materialLengthFilter) {
+        window.materialLengthFilter.filterLengthOptions(materialSelect, lengthSelect, {preselectDefault: false});
+        materialSelect.addEventListener('change', function () {
+            window.materialLengthFilter.filterLengthOptions(materialSelect, lengthSelect, {preselectDefault: false});
+        });
+    }
+
     var formulaWrap = fieldWrap(row, 'formula');
     var formulaKindWrap = fieldWrap(row, 'formula_kind');
     var formulaSelect = formulaWrap && formulaWrap.querySelector('select');

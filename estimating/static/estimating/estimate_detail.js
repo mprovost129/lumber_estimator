@@ -89,4 +89,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 window.location.reload();
             });
     });
+
+    var manualMaterialSelect = document.getElementById('id_material');
+    var manualLengthSelect = document.getElementById('id_stock_length');
+    if (manualMaterialSelect && manualLengthSelect && window.materialLengthFilter) {
+        window.materialLengthFilter.filterLengthOptions(manualMaterialSelect, manualLengthSelect, {preselectDefault: true});
+        manualMaterialSelect.addEventListener('change', function () {
+            window.materialLengthFilter.filterLengthOptions(manualMaterialSelect, manualLengthSelect, {preselectDefault: true});
+        });
+    }
 });

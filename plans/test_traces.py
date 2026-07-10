@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from catalog.models import MaterialProduct
-from estimating.models import Assembly
+from estimating.models import Assembly, LoadType
 from projects.models import JobSettings, Project
 
 from .models import Plan, PlanPage, Trace
@@ -50,6 +50,7 @@ class TraceTenancyTests(TestCase):
         self.assertContains(
             response, reverse('estimating:estimate-material-summary', args=[estimate.pk]),
         )
+        self.assertContains(response, 'data-keep-tool-active-after-draw="true"')
 
     def test_viewer_assemblies_data_carries_is_default_flag(self):
         # The viewer auto-selects a default assembly per semantic tool, which
@@ -60,6 +61,13 @@ class TraceTenancyTests(TestCase):
         self.assertTrue(assemblies, 'expected seeded global assemblies in the viewer payload')
         self.assertTrue(all('is_default' in assembly for assembly in assemblies))
         self.assertTrue(any(assembly['is_default'] for assembly in assemblies))
+
+    def test_viewer_context_includes_load_types_data(self):
+        LoadType.objects.create(account=self.user_a.account, name='First Floor System', display_order=1)
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('plans:viewer', args=[self.page_a.pk]))
+        load_types = response.context['load_types_data']
+        self.assertTrue(any(load_type['name'] == 'First Floor System' for load_type in load_types))
 
     def test_viewer_page_strip_lists_all_project_pages_but_not_foreign_ones(self):
         # The strip spans every page in the project, across plans, oldest plan
@@ -183,6 +191,23 @@ class TraceUpdateTests(TestCase):
         )
         self.trace.refresh_from_db()
         self.assertIsNone(self.trace.material_id)
+
+    def test_update_can_set_load_type(self):
+        load_type = LoadType.objects.create(account=self.user.account, name='Roof System', display_order=1)
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse('plans:trace-update', args=[self.trace.pk]),
+            data=json.dumps({
+                'material_id': self.material_2x4.id,
+                'load_type_id': load_type.pk,
+                'color': '',
+                'settings': {'stud_spacing_in': 16},
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.trace.refresh_from_db()
+        self.assertEqual(self.trace.load_type_id, load_type.pk)
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())

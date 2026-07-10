@@ -7,7 +7,7 @@ from django.utils.text import slugify
 from catalog.forms import MaterialProductInputMixin
 from catalog.models import MaterialLength, MaterialProduct
 
-from .models import Assembly, CalculationRule, Formula, LineItem, MaterialGroup
+from .models import Assembly, CalculationRule, Formula, LineItem, LoadType, MaterialGroup
 
 
 class BootstrapFormMixin:
@@ -27,26 +27,48 @@ class ManualLineItemForm(forms.ModelForm):
 
     class Meta:
         model = LineItem
-        fields = ['material', 'role', 'category', 'quantity', 'length_ft']
-        labels = {'role': 'Label', 'category': 'System', 'length_ft': 'Length (ft, optional)'}
+        fields = ['material', 'role', 'category', 'load_type', 'quantity', 'stock_length']
+        labels = {'role': 'Label', 'category': 'System', 'stock_length': 'Stock length (optional)'}
 
     def __init__(self, *args, account=None, **kwargs):
         super().__init__(*args, **kwargs)
         if account is not None:
             self.fields['material'].queryset = MaterialProduct.objects.visible_to(account)
+            self.fields['load_type'].queryset = LoadType.objects.visible_to(account)
+            self.fields['stock_length'].queryset = MaterialLength.objects.filter(
+                product__in=MaterialProduct.objects.visible_to(account),
+            ).select_related('product')
         self.fields['material'].widget.attrs['class'] = 'form-select'
         self.fields['category'].widget.attrs['class'] = 'form-select'
-        for name in ('role', 'quantity', 'length_ft'):
+        self.fields['load_type'].widget.attrs['class'] = 'form-select'
+        self.fields['stock_length'].widget.attrs['class'] = 'form-select'
+        for name in ('role', 'quantity'):
             self.fields[name].widget.attrs['class'] = 'form-control'
         self.fields['role'].required = False
-        self.fields['length_ft'].required = False
+        self.fields['stock_length'].required = False
         self.fields['category'].required = False
+        self.fields['load_type'].required = False
 
     def clean_category(self):
         # A plain CharField+choices (not a ForeignKey) gets no automatic blank
         # option, so an omitted/blank submission lands here as '' rather than
         # the model's MISC default - normalize it explicitly.
         return self.cleaned_data.get('category') or Assembly.Category.MISC
+
+    def clean(self):
+        cleaned = super().clean()
+        material = cleaned.get('material')
+        stock_length = cleaned.get('stock_length')
+        if material and stock_length and stock_length.product_id != material.id:
+            self.add_error('stock_length', 'Stock length must belong to the selected material.')
+        return cleaned
+
+    def save(self, commit=True):
+        line_item = super().save(commit=False)
+        line_item.length_ft = line_item.stock_length.length_ft if line_item.stock_length_id else None
+        if commit:
+            line_item.save()
+        return line_item
 
 
 class FormulaForm(BootstrapFormMixin, forms.ModelForm):
@@ -182,15 +204,43 @@ class MaterialForm(MaterialProductInputMixin, BootstrapFormMixin, forms.ModelFor
 
         product.full_clean(exclude=['account'])
         product.save()
-        product.lengths.all().delete()
         if product.supports_input_type(MaterialProduct.InputType.FT):
-            default_length = self.cleaned_data['default_length']
-            for length in self.cleaned_data['lengths']:
-                MaterialLength.objects.create(
-                    product=product, length_ft=length, is_default=(length == default_length),
-                )
+            self._save_lengths(product)
+        else:
+            product.lengths.all().delete()
         self._save_price(product)
         return product
+
+    def _save_lengths(self, product):
+        """Upsert MaterialLength rows to match the submitted set, preserving
+        the PK of any length that survives unchanged (or just has its
+        is_default flag flipped) - a plain delete-all/recreate-all would churn
+        every row's PK on every save, silently breaking any FK pinned to a
+        specific length (e.g. CalculationRule.preferred_length)."""
+        default_length = self.cleaned_data['default_length']
+        submitted_lengths = set(self.cleaned_data['lengths'])
+        existing = {row.length_ft: row for row in product.lengths.all()}
+
+        for length_ft, row in existing.items():
+            if length_ft not in submitted_lengths:
+                row.delete()
+
+        # Clear any stale default flag before assigning the new one, so two
+        # rows are never simultaneously is_default=True (unique constraint).
+        for length_ft, row in existing.items():
+            if length_ft in submitted_lengths and row.is_default and length_ft != default_length:
+                row.is_default = False
+                row.save(update_fields=['is_default'])
+
+        for length_ft in submitted_lengths:
+            is_default = length_ft == default_length
+            row = existing.get(length_ft)
+            if row is not None:
+                if row.is_default != is_default:
+                    row.is_default = is_default
+                    row.save(update_fields=['is_default'])
+            else:
+                MaterialLength.objects.create(product=product, length_ft=length_ft, is_default=is_default)
 
     def _save_price(self, product):
         """Upsert the account's private unit cost for this material. Account is
@@ -235,7 +285,7 @@ class CalculationRuleForm(BootstrapFormMixin, forms.ModelForm):
         model = CalculationRule
         fields = [
             'role', 'material', 'formula', 'formula_kind', 'multiplier',
-            'extra', 'coverage_sqft', 'units_per_measurement', 'material_group', 'order',
+            'extra', 'coverage_sqft', 'units_per_measurement', 'material_group', 'preferred_length', 'order',
             'corner_stud_count', 't_intersection_stud_count', 't_backer_stud_count',
         ]
 
@@ -244,9 +294,21 @@ class CalculationRuleForm(BootstrapFormMixin, forms.ModelForm):
         self.fields['material'].queryset = MaterialProduct.objects.visible_to(account)
         self.fields['formula'].queryset = Formula.objects.visible_to(account)
         self.fields['material_group'].queryset = MaterialGroup.objects.all()
+        self.fields['preferred_length'].queryset = MaterialLength.objects.filter(
+            product__in=MaterialProduct.objects.visible_to(account),
+        ).select_related('product')
         self.fields['formula'].required = False
         self.fields['formula_kind'].required = False
         self.fields['material_group'].required = False
+        self.fields['preferred_length'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        material = cleaned.get('material')
+        preferred_length = cleaned.get('preferred_length')
+        if material and preferred_length and preferred_length.product_id != material.id:
+            self.add_error('preferred_length', 'Preferred length must belong to the selected material.')
+        return cleaned
 
 
 CalculationRuleFormSet = inlineformset_factory(

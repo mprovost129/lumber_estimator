@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from accounts.models import Account
 from catalog.models import MaterialLength, MaterialProduct
-from estimating.models import Assembly, CalculationRule, LineItem
+from estimating.models import Assembly, CalculationRule, LineItem, LoadType
 from projects.models import Estimate, JobSettings, Project
 
 from .models import Trace
@@ -122,6 +122,7 @@ class TraceAssemblyWiringTests(TestCase):
 
         self.stud = MaterialProduct.objects.create(name='Wire 2x6', input_type=MaterialProduct.InputType.FT)
         MaterialLength.objects.create(product=self.stud, length_ft=16, is_default=True)
+        self.load_type = LoadType.objects.create(account=self.user.account, name='First Floor Wall System', display_order=1)
 
         self.assembly = Assembly.objects.create(name='Wire Test Wall', tool_type='line')
         CalculationRule.objects.create(
@@ -140,7 +141,7 @@ class TraceAssemblyWiringTests(TestCase):
             reverse('plans:trace-create', args=[self.page.pk]),
             data=json.dumps({
                 'tool_type': 'line', 'geometry': [{'x': 0, 'y': 0}, {'x': 300, 'y': 0}],
-                'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
+                'load_type_id': self.load_type.id, 'assembly_id': self.assembly.id, 'settings': {'stud_spacing_in': 16},
             }),
             content_type='application/json',
         )
@@ -151,6 +152,7 @@ class TraceAssemblyWiringTests(TestCase):
         self.assertEqual(line_items.count(), 1)
         # 10ft wall @ 16" OC: ceil(120/16)+1 = 8+1 = 9
         self.assertEqual(line_items.first().quantity, 9)
+        self.assertEqual(line_items.first().load_type_id, self.load_type.pk)
 
     def test_material_summary_reflects_newly_created_trace_line_items(self):
         # Exercises the same endpoint the plan viewer's live material list
@@ -218,11 +220,11 @@ class TraceAssemblyWiringTests(TestCase):
         response = self.client.get(f'{summary_url}?current_page_id={self.page.pk}')
         self.assertContains(response, f'data-trace-ids="{first_response.json()["id"]}"')
         self.assertNotContains(response, f'data-trace-ids="{second_response.json()["id"]}"')
-        self.assertContains(response, 'Links to 1 on this page of 2 traced elements')
+        self.assertContains(response, '1 of 2 linked traces are on this page.')
 
         page_only_response = self.client.get(f'{summary_url}?current_page_id={self.page.pk}&page_only=1')
         self.assertContains(page_only_response, '9')
-        self.assertContains(page_only_response, 'Links to 1 traced element')
+        self.assertContains(page_only_response, '1 linked trace on this page.')
 
     def test_create_trace_with_assembly_requires_calibration(self):
         self.page.scale_pixels_per_foot = None

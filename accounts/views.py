@@ -3,10 +3,11 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.generic import UpdateView
 from django.views import View
 
 from .emails import read_verification_token, send_verification_email
-from .forms import SignUpForm
+from .forms import SignUpForm, UserSettingsForm
 
 User = get_user_model()
 
@@ -72,3 +73,18 @@ class ResendVerificationView(LoginRequiredMixin, View):
             send_verification_email(request, request.user)
             messages.success(request, f'Verification email sent to {request.user.email}.')
         return redirect(request.META.get('HTTP_REFERER') or 'projects:dashboard')
+
+
+class UserSettingsView(LoginRequiredMixin, UpdateView):
+    form_class = UserSettingsForm
+    template_name = 'accounts/settings_form.html'
+
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Your user settings were saved.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.request.path

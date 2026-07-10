@@ -38,7 +38,9 @@
         margin: 0 -0.3rem 0.1rem;
         transition: background-color 0.14s ease;
         font-size: 0.75rem;
+        list-style: none;
     }
+    .material-summary-group-header::-webkit-details-marker { display: none; }
     .material-summary-group-header:hover {
         background: rgba(58, 124, 165, 0.08);
     }
@@ -129,20 +131,21 @@
     {% endif %}
 </div>
 {% endif %}
-{% regroup order_list by category_label as category_groups %}
-{% if category_groups %}
-{% for group in category_groups %}
-<div class="mb-3 material-summary-group" data-category-label="{{ group.grouper }}">
-    <p class="small fw-bold mb-1 material-summary-group-header" role="button" title="Highlight every traced element feeding this category on this page">
+{% regroup order_list by load_type_label as load_type_groups %}
+{% if load_type_groups %}
+{% for group in load_type_groups %}
+<details class="mb-3 material-summary-group" data-load-type-label="{{ group.grouper }}" open>
+    <summary class="small fw-bold mb-1 material-summary-group-header" role="button" title="Highlight every traced element feeding this load type on this page">
         <span>{{ group.grouper }}</span>
         <span class="badge rounded-pill text-bg-light border material-summary-group-count"></span>
-    </p>
+    </summary>
     <table class="table table-sm mb-0">
         <tbody>
             {% for row in group.list %}
             <tr class="material-summary-row {% if not row.trace_ids %}is-unlinked{% endif %} {% if row.total_trace_count and not row.visible_trace_count %}is-off-page{% endif %}"
                 data-material-label="{{ row.material__name }}{% if row.role_label %} - {{ row.role_label }}{% endif %}{% if row.length_ft %} - {{ row.length_ft|floatformat:0 }} ft{% elif row.label_length_ft %} - {{ row.label_length_ft }} ft{% endif %}"
-                data-category-label="{{ group.grouper }}"
+                data-load-type-label="{{ group.grouper }}"
+                data-category-label="{{ row.category_label }}"
                 data-quantity="{{ row.total_quantity }}"
                 data-visible-trace-count="{{ row.visible_trace_count|default:0 }}"
                 data-total-trace-count="{{ row.total_trace_count|default:0 }}"
@@ -151,11 +154,11 @@
                     {{ row.material__name }}
                     {% if row.role_label %}<span class="text-muted">&middot; {{ row.role_label }}</span>{% endif %}
                     {% if row.length_ft %}<span class="text-muted">&middot; {{ row.length_ft|floatformat:0 }} ft</span>{% endif %}
-                    {% if row.material_group_label or row.total_trace_count %}
+                    {% if row.category_label or row.material_group_label or row.total_trace_count %}
                     <div class="material-summary-meta-row material-summary-subline">
-                        {% if row.material_group_label %}
-                        <div class="small text-muted material-summary-subline">Group &middot; {{ row.material_group_label }}</div>
-                        {% endif %}
+                        <div class="small text-muted material-summary-subline">
+                            System &middot; {{ row.category_label }}{% if row.material_group_label %} &middot; {{ row.material_group_label }}{% endif %}
+                        </div>
                         {% if row.total_trace_count %}
                         <span
                             class="badge rounded-pill text-bg-light border"
@@ -193,7 +196,7 @@
             {% endfor %}
         </tbody>
     </table>
-</div>
+</details>
 {% endfor %}
 {% else %}
 <p class="text-muted small mb-0">No materials yet. Draw a trace with an assembly assigned to start building the list.</p>

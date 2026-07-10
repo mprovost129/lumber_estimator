@@ -43,28 +43,28 @@ class FormulaTests(TestCase):
 
     def test_per_stock_length_formula(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_STOCK_LENGTH, multiplier=2)
-        # 20 ft wall / 16 ft stock = ceil(1.25) = 2 pieces, x2 multiplier = 4
-        self.assertEqual(calculate_raw_quantity(rule, Decimal('20'), {}), 4)
+        # Double-run over a 20 ft wall = 40 LF total / 16 ft stock = ceil(2.5) = 3 pieces.
+        self.assertEqual(calculate_raw_quantity(rule, Decimal('20'), {}), 3)
 
     def test_per_spacing_subtracts_opening_deduction(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING, extra=1)
         # 20ft wall minus a 4ft opening = 16ft: ceil(192/16)+1 = 12+1 = 13
         measurement = {'length_ft': Decimal('20')}
-        raw, _ = evaluate_rule(rule, measurement, {'stud_spacing_in': 16}, opening_deduction_ft=Decimal('4'))
+        raw, _, _ = evaluate_rule(rule, measurement, {'stud_spacing_in': 16}, opening_deduction_ft=Decimal('4'))
         self.assertEqual(raw, 13)
 
     def test_per_spacing_deduction_clamps_at_zero(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING, extra=1)
         # A deduction larger than the wall itself must not go negative.
         measurement = {'length_ft': Decimal('5')}
-        raw, _ = evaluate_rule(rule, measurement, {'stud_spacing_in': 16}, opening_deduction_ft=Decimal('20'))
+        raw, _, _ = evaluate_rule(rule, measurement, {'stud_spacing_in': 16}, opening_deduction_ft=Decimal('20'))
         self.assertEqual(raw, 1)  # just `extra`, since the effective length floors at 0
 
     def test_per_spacing_adds_corner_studs(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING, corner_stud_count=2)
         # Base count for a 20ft wall @ 16" OC: ceil(240/16) = 15. Plus 1 corner occurrence x 2 studs.
         junctions = {'corner_count': 1, 'partition_t_count': 0, 'through_t_count': 0}
-        raw, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16}, junctions=junctions)
+        raw, _, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16}, junctions=junctions)
         self.assertEqual(raw, 17)
 
     def test_per_spacing_adds_partition_and_through_t_studs(self):
@@ -74,12 +74,12 @@ class FormulaTests(TestCase):
         )
         # Base: ceil(240/16) = 15. Plus 1 partition occurrence x 1, plus 2 through occurrences x 3.
         junctions = {'corner_count': 0, 'partition_t_count': 1, 'through_t_count': 2}
-        raw, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16}, junctions=junctions)
+        raw, _, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16}, junctions=junctions)
         self.assertEqual(raw, 15 + 1 + 6)
 
     def test_per_spacing_with_no_junctions_matches_baseline(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING)
-        raw, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16})
+        raw, _, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16})
         self.assertEqual(raw, 15)  # junctions=None defaults to all-zero, unaffected by nonzero defaults on the rule
 
     def test_per_spacing_piece_length_subtracts_plate_allowance_for_precut_studs(self):
@@ -89,19 +89,19 @@ class FormulaTests(TestCase):
         stud = MaterialProduct.objects.create(name='Test Precut Stud', input_type=MaterialProduct.InputType.FT)
         MaterialLength.objects.create(product=stud, length_ft=Decimal('7.71875'))
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING, material=stud)
-        _, piece_length = evaluate_rule(
+        _, piece_length, _ = evaluate_rule(
             rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16, 'wall_height_in': 97.125},
         )
         self.assertEqual(piece_length, Decimal('7.71875'))
 
     def test_per_spacing_piece_length_none_without_wall_height(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING)
-        _, piece_length = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16})
+        _, piece_length, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16})
         self.assertIsNone(piece_length)
 
     def test_per_spacing_piece_length_none_when_deduction_would_go_non_positive(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_SPACING)
-        _, piece_length = evaluate_rule(
+        _, piece_length, _ = evaluate_rule(
             rule, {'length_ft': Decimal('20')}, {'stud_spacing_in': 16, 'wall_height_in': 4},
         )
         self.assertIsNone(piece_length)
@@ -183,8 +183,24 @@ class GenerateLineItemsTests(TestCase):
         self.assertIsNone(stud_item.length_ft)
 
         plate_item = LineItem.objects.get(calculation_rule=self.plate_rule)
-        self.assertEqual(plate_item.quantity, 4)
+        self.assertEqual(plate_item.quantity, 3)
         self.assertEqual(plate_item.length_ft, 16)
+        self.assertEqual(plate_item.stock_length, self.stud.lengths.get(is_default=True))
+        self.assertIsNone(stud_item.stock_length)
+
+    def test_preferred_length_overrides_auto_resolution_for_per_stock_length(self):
+        twenty = MaterialLength.objects.create(product=self.stud, length_ft=20)
+        self.plate_rule.preferred_length = twenty
+        self.plate_rule.save()
+
+        generate_line_items(self.estimate, self.assembly, Decimal('20'), {'stud_spacing_in': 16})
+
+        plate_item = LineItem.objects.get(calculation_rule=self.plate_rule)
+        # Double-run over a 20 ft wall = 40 LF total / a pinned 20 ft stock = 2 pieces,
+        # not the auto-picked default (16 ft, which would be 3 pieces).
+        self.assertEqual(plate_item.quantity, 2)
+        self.assertEqual(plate_item.length_ft, 20)
+        self.assertEqual(plate_item.stock_length, twenty)
 
     def test_regenerating_for_same_trace_replaces_not_duplicates(self):
         page = make_plan_page(self.project)
@@ -234,14 +250,14 @@ class SeededAssemblyMatchesReferenceSpecTests(TestCase):
         rule = CalculationRule.objects.get(assembly__name='2x8 Roof Rafters - 16 in OC', role='Rafter')
         # Spreadsheet's Roof Takeoff example: 40ft building, 24in OC, 2 planes, 10% waste -> 47.
         measurement = {'bbox_width_ft': Decimal('40'), 'bbox_height_ft': Decimal('16')}
-        raw, _ = evaluate_rule(rule, measurement, {'spacing_in': 24, 'member_direction': 'vertical'})
+        raw, _, _ = evaluate_rule(rule, measurement, {'spacing_in': 24, 'member_direction': 'vertical'})
         self.assertEqual(apply_waste(raw, rule.waste_factor), 47)
 
     def test_seeded_wall_assembly_includes_framing_nails_per_box(self):
         rule = CalculationRule.objects.get(assembly__name='2x6 Wall - 16 in OC', role='Framing Nails')
         self.assertEqual(rule.formula_kind, CalculationRule.FormulaKind.PER_BOX)
         # 40ft wall x 10 nails/ft = 400 nails -> ceil(400 / 2500) = 1 box.
-        raw, _ = evaluate_rule(rule, {'length_ft': Decimal('40')}, {})
+        raw, _, _ = evaluate_rule(rule, {'length_ft': Decimal('40')}, {})
         self.assertEqual(raw, 1)
 
 
@@ -269,14 +285,14 @@ class SplicedFormulaTests(TestCase):
     def test_per_length_spliced_single_piece_when_it_fits(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_LENGTH_SPLICED, multiplier=3)
         # 16 ft span fits one 16 ft stock piece: 3 plies x 1 = 3, cut from 16 ft.
-        raw, length = evaluate_rule(rule, {'length_ft': Decimal('16')}, {})
+        raw, length, _ = evaluate_rule(rule, {'length_ft': Decimal('16')}, {})
         self.assertEqual(raw, 3)
         self.assertEqual(length, Decimal('16'))
 
     def test_per_length_spliced_splices_when_over_length(self):
         rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_LENGTH_SPLICED, multiplier=3)
         # 44 ft span: ceil(44 / 20) = 3 pieces per ply, x3 plies = 9, from 20 ft stock.
-        raw, length = evaluate_rule(rule, {'length_ft': Decimal('44')}, {})
+        raw, length, _ = evaluate_rule(rule, {'length_ft': Decimal('44')}, {})
         self.assertEqual(raw, 9)
         self.assertEqual(length, Decimal('20'))
 
@@ -290,9 +306,34 @@ class SplicedFormulaTests(TestCase):
             'bbox_width_ft': Decimal('30'), 'bbox_height_ft': Decimal('16'),
             'area_sqft': Decimal('480'), 'perimeter_ft': Decimal('92'),
         }
-        raw, length = evaluate_rule(rule, measurement, {'spacing_in': 16})
+        raw, length, _ = evaluate_rule(rule, measurement, {'spacing_in': 16})
         self.assertEqual(raw, 26)
         self.assertEqual(length, Decimal('20'))
+
+    def test_preferred_length_overrides_splice_unit(self):
+        rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_LENGTH_SPLICED, multiplier=1)
+        twelve = MaterialLength.objects.get(product=self.material, length_ft=12)
+        rule.preferred_length = twelve
+        rule.save()
+        # 44 ft span spliced from a pinned 12 ft unit: ceil(44/12) = 4 pieces,
+        # not the auto-picked longest stock (20 ft, which would be 3 pieces).
+        raw, length, row = evaluate_rule(rule, {'length_ft': Decimal('44')}, {})
+        self.assertEqual(raw, 4)
+        self.assertEqual(length, Decimal('12'))
+        self.assertEqual(row, twelve)
+
+    def test_preferred_length_overrides_auto_resolution_for_per_length(self):
+        rule = self._rule(formula_kind=CalculationRule.FormulaKind.PER_LENGTH, multiplier=2)
+        twelve = MaterialLength.objects.get(product=self.material, length_ft=12)
+        rule.preferred_length = twelve
+        rule.save()
+        # Auto-resolution would pick the smallest covering stock for a 10 ft
+        # span (12 ft, same as the pin here) - use a span where the pin
+        # differs from what auto-resolution would otherwise choose.
+        raw, length, row = evaluate_rule(rule, {'length_ft': Decimal('15')}, {})
+        self.assertEqual(raw, 2)
+        self.assertEqual(length, Decimal('12'))
+        self.assertEqual(row, twelve)
 
     def test_over_length_still_raises_for_non_spliced_per_length(self):
         # The plain per_length kind keeps its guardrail: no single stock covers 44 ft.

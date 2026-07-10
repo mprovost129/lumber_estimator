@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var PROJECT_ID = root.dataset.projectId;
     var PAGE_ID = root.dataset.pageId;
     var isCalibrated = root.dataset.isCalibrated === 'true';
+    var keepToolActiveAfterDraw = root.dataset.keepToolActiveAfterDraw !== 'false';
     var scalePixelsPerFoot = parseFloat(root.dataset.scalePixelsPerFoot) || null;
     var defaultStudSpacing = parseInt(root.dataset.defaultStudSpacing, 10) || 16;
     var defaultWallHeight = parseFloat(root.dataset.defaultWallHeight) || 109.125;
@@ -77,6 +78,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var applyScalePresetButton = document.getElementById('apply-scale-preset');
 
     var materialSelect = document.getElementById('material-select');
+    var loadTypeSelect = document.getElementById('load-type-select');
     var assemblySelect = document.getElementById('assembly-select');
     var studSpacingInput = document.getElementById('stud-spacing-input');
     var wallHeightInput = document.getElementById('wall-height-input');
@@ -113,6 +115,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var inspectorConfidenceStatus = document.getElementById('inspector-confidence-status');
     var inspectorConfidenceText = document.getElementById('inspector-confidence-text');
     var inspectorMaterialSelect = document.getElementById('inspector-material-select');
+    var inspectorLoadTypeSelect = document.getElementById('inspector-load-type-select');
     var inspectorAssemblySelect = document.getElementById('inspector-assembly-select');
     var inspectorParentWallWrap = document.getElementById('inspector-parent-wall-wrap');
     var inspectorParentWallSelect = document.getElementById('inspector-parent-wall-select');
@@ -129,6 +132,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var bulkSelectionSummary = document.getElementById('bulk-selection-summary');
     var bulkMaterialToggle = document.getElementById('bulk-material-toggle');
     var bulkMaterialSelect = document.getElementById('bulk-material-select');
+    var bulkLoadTypeToggle = document.getElementById('bulk-load-type-toggle');
+    var bulkLoadTypeSelect = document.getElementById('bulk-load-type-select');
     var bulkAssemblyWrap = document.getElementById('bulk-assembly-wrap');
     var bulkAssemblyToggle = document.getElementById('bulk-assembly-toggle');
     var bulkAssemblySelect = document.getElementById('bulk-assembly-select');
@@ -165,6 +170,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var initialTraces = JSON.parse(document.getElementById('traces-data').textContent);
     var materialsData = JSON.parse(document.getElementById('materials-data').textContent);
+    var loadTypesData = JSON.parse(document.getElementById('load-types-data').textContent);
     var assembliesData = JSON.parse(document.getElementById('assemblies-data').textContent);
     var wallsData = JSON.parse(document.getElementById('walls-data').textContent);
     var presetsById = {};
@@ -232,7 +238,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 syncMaterialListSelection();
                 updateMaterialToolbarState();
                 applyMaterialVisibility();
-                annotateMaterialCategoryHeaders();
+                annotateMaterialGroupHeaders();
             })
             .catch(function () { /* not on the critical path - the panel just stays stale */ });
     }
@@ -242,7 +248,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // ------------------------------------------- material visibility toggles
     // The material list doubles as the visibility sidebar: each linked row has
     // an eye toggle that shows/hides its traces on the canvas. Hidden state is
-    // keyed by the row's material label + category (stable across the partial
+    // keyed by the row's material label + load type + system (stable across the partial
     // re-render that follows every trace change) and kept in sessionStorage per
     // page, like zoom. A trace linked from several rows (one wall feeds studs
     // AND plates rows) hides while ANY of its rows is hidden; visibility is
@@ -255,7 +261,7 @@ document.addEventListener('DOMContentLoaded', function () {
     } catch (e) { /* fresh session */ }
 
     function materialVisibilityKey(row) {
-        return (row.dataset.materialLabel || '') + '|' + (row.dataset.categoryLabel || '');
+        return (row.dataset.materialLabel || '') + '|' + (row.dataset.loadTypeLabel || '') + '|' + (row.dataset.categoryLabel || '');
     }
 
     function persistHiddenMaterials() {
@@ -335,8 +341,8 @@ document.addEventListener('DOMContentLoaded', function () {
         activeMaterialSummary = materialSummaryFromRow(row);
         activateLinkedTraceIds(traceIds);
     });
-    // Category headers double as clickable summary cards: one click
-    // highlights every traced element feeding that construction system on
+    // Group headers double as clickable summary cards: one click
+    // highlights every traced element feeding that load type on
     // this page, the same way a single material row does for its own rows.
     document.getElementById('material-list-content').addEventListener('click', function (event) {
         if (event.target.closest('.material-group-waste-editor')) {
@@ -364,7 +370,7 @@ document.addEventListener('DOMContentLoaded', function () {
         activateLinkedTraceIds(traceIds);
     });
 
-    function annotateMaterialCategoryHeaders() {
+    function annotateMaterialGroupHeaders() {
         document.querySelectorAll('#material-list-content .material-summary-group').forEach(function (group) {
             var rows = group.querySelectorAll('.material-summary-row');
             var totalQuantity = 0;
@@ -376,6 +382,19 @@ document.addEventListener('DOMContentLoaded', function () {
                 badge.textContent = rows.length + ' line' + (rows.length === 1 ? '' : 's')
                     + ' · ' + totalQuantity + ' pcs';
             }
+        });
+    }
+
+    function populateLoadTypeOptions(select) {
+        if (!select) {
+            return;
+        }
+        select.innerHTML = '<option value="">-- unassigned --</option>';
+        loadTypesData.forEach(function (loadType) {
+            var option = document.createElement('option');
+            option.value = loadType.id;
+            option.textContent = loadType.name;
+            select.appendChild(option);
         });
     }
 
@@ -456,7 +475,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     materialCategoryOnlyButton.addEventListener('click', function () {
-        if (!activeMaterialSummary || !activeMaterialSummary.categoryLabel) {
+        if (!activeMaterialSummary || !activeMaterialSummary.loadTypeLabel) {
             return;
         }
         materialCategoryOnly = !materialCategoryOnly;
@@ -824,6 +843,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('#tool-settings-panel [data-field]').forEach(function (wrap) {
             wrap.style.display = fields.indexOf(wrap.dataset.field) === -1 ? 'none' : '';
         });
+        populateLoadTypeOptions(loadTypeSelect);
         populateAssemblyOptions(assemblySelect, tool, collectSettings(tool, ''), activeVariantFilter, Boolean(activeSemanticKey));
         populatePresetOptions(tool);
         colorInput.value = config.color;
@@ -1093,6 +1113,7 @@ document.addEventListener('DOMContentLoaded', function () {
             settings: collectSettings(tool, ''),
             assemblyId: assemblySelect.value || '',
             materialId: materialSelect.value || '',
+            loadTypeId: loadTypeSelect.value || '',
             color: colorInput.value || '',
         };
         try {
@@ -1129,6 +1150,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         if (optionExists(materialSelect, memory.materialId)) {
             materialSelect.value = memory.materialId || '';
+        }
+        if (optionExists(loadTypeSelect, memory.loadTypeId)) {
+            loadTypeSelect.value = memory.loadTypeId || '';
         }
         if (optionExists(assemblySelect, memory.assemblyId)) {
             assemblySelect.value = memory.assemblyId || '';
@@ -2193,6 +2217,11 @@ document.addEventListener('DOMContentLoaded', function () {
         var uniqueMaterialIds = Array.from(new Set(materialIds));
         bulkMaterialSelect.value = uniqueMaterialIds.length === 1 ? uniqueMaterialIds[0] : '';
         bulkMaterialToggle.checked = uniqueMaterialIds.length === 1 && Boolean(uniqueMaterialIds[0]);
+        populateLoadTypeOptions(bulkLoadTypeSelect);
+        var loadTypeIds = objects.map(function (obj) { return String(obj.traceLoadTypeId || ''); });
+        var uniqueLoadTypeIds = Array.from(new Set(loadTypeIds));
+        bulkLoadTypeSelect.value = uniqueLoadTypeIds.length === 1 ? uniqueLoadTypeIds[0] : '';
+        bulkLoadTypeToggle.checked = uniqueLoadTypeIds.length === 1 && Boolean(uniqueLoadTypeIds[0]);
 
         var colors = objects.map(function (obj) {
             return obj.traceColor || ((TOOLS[obj.traceToolType] || TOOLS.line).color);
@@ -2292,6 +2321,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         var payload = {
             material_id: obj.traceMaterialId || null,
+            load_type_id: obj.traceLoadTypeId || null,
             assembly_id: obj.traceAssemblyId || null,
             parent_wall_id: obj.traceParentWallId || null,
             color: obj.traceColor || '',
@@ -2482,6 +2512,8 @@ document.addEventListener('DOMContentLoaded', function () {
         inspectorConfidenceStatus.style.display = confidenceReason ? '' : 'none';
         inspectorConfidenceText.textContent = confidenceReason;
         inspectorMaterialSelect.value = obj.traceMaterialId || '';
+        populateLoadTypeOptions(inspectorLoadTypeSelect);
+        inspectorLoadTypeSelect.value = obj.traceLoadTypeId || '';
         populateAssemblyOptions(inspectorAssemblySelect, obj.traceToolType, obj.traceSettings || {});
         inspectorAssemblySelect.value = obj.traceAssemblyId || '';
         inspectorParentWallWrap.style.display = obj.traceToolType === 'opening' ? '' : 'none';
@@ -2758,6 +2790,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return Boolean(target && target.id && (
             target.id.indexOf('inspector-') === 0 ||
             target.id === 'inspector-material-select' ||
+            target.id === 'inspector-load-type-select' ||
             target.id === 'inspector-assembly-select' ||
             target.id === 'inspector-parent-wall-select' ||
             target.id === 'inspector-color-input'
@@ -2793,6 +2826,7 @@ document.addEventListener('DOMContentLoaded', function () {
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
             body: JSON.stringify({
                 material_id: inspectorMaterialSelect.value || null,
+                load_type_id: inspectorLoadTypeSelect.value || null,
                 assembly_id: inspectorAssemblySelect.value || null,
                 parent_wall_id: toolType === 'opening' ? (inspectorParentWallSelect.value || null) : null,
                 color: inspectorColorInput.value,
@@ -2805,6 +2839,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     return;
                 }
                 selectedTrace.traceMaterialId = trace.material_id;
+                selectedTrace.traceLoadTypeId = trace.load_type_id;
                 selectedTrace.traceAssemblyId = trace.assembly_id;
                 selectedTrace.traceParentWallId = trace.parent_wall_id;
                 selectedTrace.traceColor = trace.color;
@@ -2876,6 +2911,7 @@ document.addEventListener('DOMContentLoaded', function () {
             toolType: obj.traceToolType,
             geometry: obj.traceGeometry || [],
             materialId: obj.traceMaterialId || null,
+            loadTypeId: obj.traceLoadTypeId || null,
             assemblyId: obj.traceAssemblyId || null,
             parentWallId: obj.traceParentWallId || null,
             color: obj.traceColor || '',
@@ -2910,6 +2946,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(handleJsonResponse)
             .then(function (trace) {
                 obj.traceMaterialId = trace.material_id;
+                obj.traceLoadTypeId = trace.load_type_id;
                 obj.traceAssemblyId = trace.assembly_id;
                 obj.traceParentWallId = trace.parent_wall_id;
                 obj.traceColor = trace.color;
@@ -2925,6 +2962,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function applyTracePayloadToObject(obj, trace) {
         obj.traceMaterialId = trace.material_id;
+        obj.traceLoadTypeId = trace.load_type_id;
         obj.traceAssemblyId = trace.assembly_id;
         obj.traceParentWallId = trace.parent_wall_id;
         obj.traceColor = trace.color;
@@ -2972,6 +3010,8 @@ document.addEventListener('DOMContentLoaded', function () {
         persistTraceBatchUpdate(linkedTraceIds.slice(), {
             apply_material: true,
             material_id: materialSelect.value || null,
+            apply_load_type: true,
+            load_type_id: loadTypeSelect.value || null,
             apply_assembly: true,
             assembly_id: assemblySelect.value || null,
             apply_color: true,
@@ -2995,6 +3035,8 @@ document.addEventListener('DOMContentLoaded', function () {
         persistTraceBatchUpdate(linkedTraceIds.slice(), {
             apply_material: bulkMaterialToggle.checked,
             material_id: bulkMaterialSelect.value || null,
+            apply_load_type: bulkLoadTypeToggle.checked,
+            load_type_id: bulkLoadTypeSelect.value || null,
             apply_assembly: bulkAssemblyWrap.style.display !== 'none' && bulkAssemblyToggle.checked,
             assembly_id: bulkAssemblySelect.value || null,
             apply_color: bulkColorToggle.checked,
@@ -3116,6 +3158,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (optionExists(materialSelect, snapshot.materialId)) {
             materialSelect.value = snapshot.materialId || '';
         }
+        if (optionExists(loadTypeSelect, snapshot.loadTypeId)) {
+            loadTypeSelect.value = snapshot.loadTypeId || '';
+        }
         if (optionExists(assemblySelect, snapshot.assemblyId)) {
             assemblySelect.value = snapshot.assemblyId || '';
         }
@@ -3149,14 +3194,17 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    function selectTraceObject(obj) {
+    function selectTraceObject(obj, options) {
         if (!obj) {
             return;
         }
+        var opts = options || {};
         canvas.discardActiveObject();
         canvas.setActiveObject(obj);
         canvas.requestRenderAll();
-        scrollCanvasObjectsIntoView([obj]);
+        if (opts.scrollIntoView !== false) {
+            scrollCanvasObjectsIntoView([obj]);
+        }
         onTraceSelected();
     }
 
@@ -3165,6 +3213,13 @@ document.addEventListener('DOMContentLoaded', function () {
             return Promise.resolve(null);
         }
         var opts = options || {};
+        var preservedScroll = null;
+        if (opts.preserveViewport) {
+            preservedScroll = {
+                left: canvasWrapEl.scrollLeft,
+                top: canvasWrapEl.scrollTop,
+            };
+        }
         return fetch(TRACE_CREATE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
@@ -3172,6 +3227,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 tool_type: snapshot.toolType,
                 geometry: opts.geometry || snapshot.geometry,
                 material_id: snapshot.materialId,
+                load_type_id: snapshot.loadTypeId,
                 assembly_id: snapshot.assemblyId,
                 parent_wall_id: snapshot.parentWallId,
                 color: snapshot.color,
@@ -3182,8 +3238,12 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (trace) {
                 var obj = drawTrace(trace);
                 refreshMaterialList();
+                if (preservedScroll) {
+                    canvasWrapEl.scrollLeft = preservedScroll.left;
+                    canvasWrapEl.scrollTop = preservedScroll.top;
+                }
                 if (opts.selectCreated !== false) {
-                    selectTraceObject(obj);
+                    selectTraceObject(obj, { scrollIntoView: opts.scrollCreatedIntoView === true });
                 }
                 return trace;
             });
@@ -3337,6 +3397,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return {
             label: row.dataset.materialLabel || 'Material row',
             categoryLabel: row.dataset.categoryLabel || '',
+            loadTypeLabel: row.dataset.loadTypeLabel || '',
             quantity: row.dataset.quantity || '',
             visibleTraceCount: parseInt(row.dataset.visibleTraceCount || '0', 10) || 0,
             totalTraceCount: parseInt(row.dataset.totalTraceCount || '0', 10) || 0,
@@ -3380,8 +3441,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     return linkedTraceIds.indexOf(traceId) !== -1;
                 });
             }
-            if (visible && materialCategoryOnly && activeMaterialSummary && activeMaterialSummary.categoryLabel) {
-                visible = row.dataset.categoryLabel === activeMaterialSummary.categoryLabel;
+            if (visible && materialCategoryOnly && activeMaterialSummary && activeMaterialSummary.loadTypeLabel) {
+                visible = row.dataset.loadTypeLabel === activeMaterialSummary.loadTypeLabel;
             }
             row.style.display = visible ? '' : 'none';
         });
@@ -3419,9 +3480,9 @@ document.addEventListener('DOMContentLoaded', function () {
             materialSelectedOnlyButton.classList.toggle('btn-outline-secondary', !materialSelectedOnly);
         }
         if (materialCategoryOnlyButton) {
-            materialCategoryOnlyButton.disabled = !(activeMaterialSummary && activeMaterialSummary.categoryLabel);
-            materialCategoryOnlyButton.textContent = 'Current category: ' + (materialCategoryOnly ? 'On' : 'Off');
-            materialCategoryOnlyButton.classList.toggle('btn-primary', Boolean(activeMaterialSummary && activeMaterialSummary.categoryLabel && materialCategoryOnly));
+            materialCategoryOnlyButton.disabled = !(activeMaterialSummary && activeMaterialSummary.loadTypeLabel);
+            materialCategoryOnlyButton.textContent = 'Current load type: ' + (materialCategoryOnly ? 'On' : 'Off');
+            materialCategoryOnlyButton.classList.toggle('btn-primary', Boolean(activeMaterialSummary && activeMaterialSummary.loadTypeLabel && materialCategoryOnly));
             materialCategoryOnlyButton.classList.toggle('btn-outline-secondary', !materialCategoryOnly);
         }
         if (materialPrevLinkedButton) {
@@ -3450,7 +3511,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 materialListStatus.textContent = 'Filtered to ' +
                     (materialSelectedOnly ? 'selected rows' : 'all rows') +
                     (materialSelectedOnly && materialCategoryOnly ? ' and ' : '') +
-                    (materialCategoryOnly ? 'the current category' : '') + '.';
+                    (materialCategoryOnly ? 'the current load type' : '') + '.';
             } else if (focusLinkedMode) {
                 materialListStatus.textContent = linkedTraceIds.length + ' linked trace' + (linkedTraceIds.length === 1 ? '' : 's') + ' focused on the plan.';
             } else {
@@ -4028,6 +4089,7 @@ document.addEventListener('DOMContentLoaded', function () {
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrftoken },
             body: JSON.stringify({
                 material_id: selectedTrace.traceMaterialId || null,
+                load_type_id: selectedTrace.traceLoadTypeId || null,
                 assembly_id: selectedTrace.traceAssemblyId || null,
                 color: selectedTrace.traceColor || '#0d6efd',
                 settings: selectedTrace.traceSettings || {},
@@ -4088,6 +4150,9 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         materialSelect.value = preset.material_id || '';
+        if (optionExists(loadTypeSelect, preset.load_type_id)) {
+            loadTypeSelect.value = preset.load_type_id || '';
+        }
         var settings = preset.settings || {};
         if (settings.stud_spacing_in) { studSpacingInput.value = settings.stud_spacing_in; }
         if (settings.wall_height_in) { wallHeightInput.value = settings.wall_height_in; }
@@ -4139,6 +4204,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 name: name,
                 tool_type: activeTool,
                 material_id: materialSelect.value || null,
+                load_type_id: loadTypeSelect.value || null,
                 assembly_id: assemblySelect.value || null,
                 color: colorInput.value,
                 settings: collectSettings(activeTool, ''),
@@ -4167,10 +4233,15 @@ document.addEventListener('DOMContentLoaded', function () {
             toolType: tool,
             geometry: geometry,
             materialId: materialSelect.value || null,
+            loadTypeId: loadTypeSelect.value || null,
             assemblyId: assemblySelect.value || null,
             parentWallId: null,
             color: colorInput.value,
             settings: collectSettings(tool, ''),
+        }, {
+            preserveViewport: true,
+            selectCreated: !keepToolActiveAfterDraw,
+            scrollCreatedIntoView: false,
         })
             .then(function (trace) {
                 if (trace.measurement_display) {
@@ -4247,6 +4318,7 @@ document.addEventListener('DOMContentLoaded', function () {
         obj.traceId = trace.id;
         obj.traceToolType = trace.tool_type;
         obj.traceMaterialId = trace.material_id;
+        obj.traceLoadTypeId = trace.load_type_id;
         obj.traceAssemblyId = trace.assembly_id;
         obj.traceParentWallId = trace.parent_wall_id;
         obj.traceGeometry = trace.geometry || [];

@@ -19,11 +19,12 @@ from django.views.generic import CreateView, DetailView, TemplateView
 
 from accounts.models import Account
 from billing.services import estimate_output_access
+from catalog.models import MaterialLength, MaterialProduct
 from projects.models import Estimate
 
 from .calculations import generate_line_items
 from .forms import AssemblyForm, CalculationRuleFormSet, FormulaForm, ManualLineItemForm, MaterialForm
-from .models import Assembly, CalculationRule, EstimateMaterialGroup, Formula, LineItem, MaterialGroup
+from .models import Assembly, CalculationRule, EstimateMaterialGroup, Formula, LineItem, LoadType, MaterialGroup
 
 CATEGORY_DEFAULT_ORDER = list(Assembly.Category.values)
 CATEGORY_LABELS = dict(Assembly.Category.choices)
@@ -67,6 +68,27 @@ def _item_rank(account, category, role):
     return normalized.index(key) if key in normalized else len(normalized)
 
 
+def _load_type_sort_value(row_or_item):
+    load_type = getattr(row_or_item, 'load_type', None)
+    if load_type is not None:
+        return (0, load_type.display_order, load_type.name.lower())
+    load_type_name = ''
+    load_type_order = None
+    if isinstance(row_or_item, dict):
+        load_type_name = row_or_item.get('load_type__name') or ''
+        load_type_order = row_or_item.get('load_type__display_order')
+    return (1, load_type_order if load_type_order is not None else 9999, load_type_name.lower())
+
+
+def _load_type_label(row_or_item):
+    load_type = getattr(row_or_item, 'load_type', None)
+    if load_type is not None:
+        return load_type.name
+    if isinstance(row_or_item, dict):
+        return row_or_item.get('load_type__name') or 'Unassigned'
+    return 'Unassigned'
+
+
 def _grouped_order_list(estimate, page_id=None, page_only=False):
     """The supplier-ready view: line items grouped by product + piece length
     *and* construction system (so the same SKU used under two different
@@ -80,6 +102,7 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
         .values(
             'effective_category', 'material_id', 'material__name', 'material__nominal_dimension',
             'material__species', 'material__grade', 'material_group_id', 'material_group__name',
+            'load_type_id', 'load_type__name', 'load_type__display_order',
             'length_ft', 'waste_factor',
         )
         .annotate(total_quantity=Sum('quantity'), min_role=Min('role'))
@@ -88,11 +111,13 @@ def _grouped_order_list(estimate, page_id=None, page_only=False):
     # row spans more than one role within the same category - not a source
     # of truth for item order at that granularity.
     rows.sort(key=lambda r: (
+        _load_type_sort_value(r),
         category_rank.get(r['effective_category'], len(category_rank)),
         _item_rank(account, r['effective_category'], r['min_role']),
         r['material__name'],
     ))
     for row in rows:
+        row['load_type_label'] = _load_type_label(row)
         row['category_label'] = CATEGORY_LABELS.get(row['effective_category'], row['effective_category'])
         row['role_label'] = row.get('min_role') or ''
         row['material_group_label'] = row.get('material_group__name') or ''
@@ -165,6 +190,61 @@ def _summary_line_items(estimate, page_id=None, page_only=False):
     return line_items
 
 
+def _repair_legacy_formula_stock_line_items(estimate, page_id=None, page_only=False):
+    """Backfill trace-generated rows from older line/perimeter formula
+    assemblies that predate stock-piece ordering for feet materials.
+
+    Those legacy rows were stored as raw LF with no piece length, so newer
+    grouped summaries read them as enormous piece counts. Regenerate only the
+    suspicious traces (tool-generated, formula-backed, null piece length) and
+    only when at least one rule in the assembly is a line/perimeter formula on
+    a feet-stock material. Once regenerated, the rows carry their stock length
+    and stop matching this repair path."""
+    from plans.geometry import measure_geometry
+    from plans.models import Trace
+
+    legacy_formula_kinds = (
+        Formula.MeasurementKind.LINE_LF,
+        Formula.MeasurementKind.PERIMETER_LF,
+    )
+    legacy_rows = estimate.line_items.filter(
+        source=LineItem.Source.TOOL,
+        trace_id__isnull=False,
+        length_ft__isnull=True,
+        calculation_rule__formula__measurement_kind__in=legacy_formula_kinds,
+    )
+    if page_only and page_id:
+        legacy_rows = legacy_rows.filter(trace__plan_page_id=page_id)
+    trace_ids = list(legacy_rows.values_list('trace_id', flat=True).distinct())
+    if not trace_ids:
+        return
+
+    traces = (
+        Trace.objects.filter(pk__in=trace_ids)
+        .select_related('assembly', 'plan_page', 'plan_page__plan__project')
+        .prefetch_related('assembly__rules__material__lengths', 'assembly__rules__formula')
+        .order_by('pk')
+    )
+    if page_id:
+        traces = traces.filter(plan_page_id=page_id)
+    for trace in traces:
+        if not trace.assembly_id:
+            continue
+        if trace.tool_type != Trace.ToolType.COUNT and trace.plan_page.scale_pixels_per_foot is None:
+            continue
+        if not any(
+            rule.formula_id
+            and rule.formula.measurement_kind in legacy_formula_kinds
+            and rule.material.supports_input_type(MaterialProduct.InputType.FT)
+            for rule in trace.assembly.rules.all()
+        ):
+            continue
+        measurement = measure_geometry(
+            trace.tool_type, trace.geometry, trace.plan_page.scale_pixels_per_foot or 1, trace.settings,
+        )
+        generate_line_items(estimate, trace.assembly, measurement, trace.settings, trace=trace)
+
+
 def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=False):
     """Add current-page and all-page trace context for each grouped summary
     row so the viewer can link material lines back to visible plan elements
@@ -177,7 +257,7 @@ def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=
         .exclude(trace_id__isnull=True)
         .values(
             'effective_category', 'material__name', 'material__nominal_dimension',
-            'material__species', 'material__grade', 'material_group_id', 'waste_factor',
+            'material__species', 'material__grade', 'material_group_id', 'load_type_id', 'waste_factor',
             'length_ft', 'trace_id', 'trace__plan_page_id',
         )
     )
@@ -189,6 +269,7 @@ def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=
             item['material__species'],
             item['material__grade'],
             item['material_group_id'],
+            item['load_type_id'],
             item['waste_factor'],
             item['length_ft'],
         )
@@ -204,6 +285,7 @@ def _attach_trace_context(order_list, estimate, current_page_id=None, page_only=
             row['material__species'],
             row['material__grade'],
             row['material_group_id'],
+            row['load_type_id'],
             row['waste_factor'],
             row['length_ft'],
         )
@@ -266,15 +348,18 @@ class EstimateDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         account = self.request.user.account
+        _repair_legacy_formula_stock_line_items(self.object)
         line_items = list(
-            self.object.line_items.select_related('material', 'material_group', 'trace__plan_page')
+            self.object.line_items.select_related('material', 'material_group', 'load_type', 'trace__plan_page')
             .annotate(effective_category=_effective_category())
             .order_by()
         )
         for item in line_items:
             item.waste_percent = _waste_percent(item.waste_factor or Decimal('0'))
+            item.load_type_label = _load_type_label(item)
         category_rank = {c: i for i, c in enumerate(_category_order_for(account))}
         line_items.sort(key=lambda li: (
+            _load_type_sort_value(li),
             category_rank.get(li.effective_category, len(category_rank)),
             _item_rank(account, li.effective_category, li.role),
         ))
@@ -288,7 +373,13 @@ class EstimateDetailView(LoginRequiredMixin, DetailView):
         context['order_list'] = order_list
         context['totals'] = _summary_totals(order_list)
         context['manual_form'] = ManualLineItemForm(account=account)
+        context['load_types'] = LoadType.objects.visible_to(account)
         context['estimate_access'] = estimate_output_access(self.object)
+        context['material_lengths_data'] = list(
+            MaterialLength.objects.filter(product__in=MaterialProduct.objects.visible_to(account))
+            .order_by('product_id', 'length_ft')
+            .values('id', 'product_id', 'length_ft', 'is_default')
+        )
         return context
 
 
@@ -316,6 +407,9 @@ class EstimateMaterialSummaryView(LoginRequiredMixin, DetailView):
             current_page_id = int(current_page_id) if current_page_id else None
         except (TypeError, ValueError):
             current_page_id = None
+        _repair_legacy_formula_stock_line_items(
+            self.object, page_id=current_page_id, page_only=page_only,
+        )
         order_list = _grouped_order_list(self.object, page_id=current_page_id, page_only=page_only)
         context['order_list'] = _attach_trace_context(
             order_list,
@@ -1096,4 +1190,11 @@ class AssemblyCreateView(LoginRequiredMixin, View):
         return self._render(request, form, rules)
 
     def _render(self, request, form, rules):
-        return render(request, self.template_name, {'form': form, 'rules': rules})
+        material_lengths_data = list(
+            MaterialLength.objects.filter(product__in=MaterialProduct.objects.visible_to(request.user.account))
+            .order_by('product_id', 'length_ft')
+            .values('id', 'product_id', 'length_ft', 'is_default')
+        )
+        return render(request, self.template_name, {
+            'form': form, 'rules': rules, 'material_lengths_data': material_lengths_data,
+        })

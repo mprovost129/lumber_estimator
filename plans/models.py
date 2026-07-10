@@ -91,6 +91,9 @@ class Trace(models.Model):
     material = models.ForeignKey(
         'catalog.MaterialProduct', on_delete=models.PROTECT, null=True, blank=True, related_name='traces',
     )
+    load_type = models.ForeignKey(
+        'estimating.LoadType', on_delete=models.SET_NULL, null=True, blank=True, related_name='traces',
+    )
     assembly = models.ForeignKey(
         'estimating.Assembly', on_delete=models.PROTECT, null=True, blank=True, related_name='traces',
         help_text='When set, the calculation engine generates LineItems from this Trace.',
@@ -123,6 +126,9 @@ class ToolPreset(models.Model):
     tool_type = models.CharField(max_length=20, choices=Trace.ToolType.choices)
     material = models.ForeignKey(
         'catalog.MaterialProduct', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_presets',
+    )
+    load_type = models.ForeignKey(
+        'estimating.LoadType', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_presets',
     )
     assembly = models.ForeignKey(
         'estimating.Assembly', on_delete=models.SET_NULL, null=True, blank=True, related_name='tool_presets',

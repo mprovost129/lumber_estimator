@@ -12,7 +12,7 @@ from plans.models import Trace
 from plans.test_traces import make_plan_page
 from projects.models import Estimate, Project
 
-from .models import LineItem, MaterialGroup
+from .models import Assembly, CalculationRule, Formula, LineItem, LoadType, MaterialGroup
 
 User = get_user_model()
 
@@ -182,9 +182,11 @@ class EstimateMaterialSummaryViewTests(TestCase):
         group, _ = MaterialGroup.objects.get_or_create(
             name='Wall Sheathing', defaults={'default_waste_factor': Decimal('0.10')},
         )
+        load_type = LoadType.objects.create(account=self.user_a.account, name='First Floor System', display_order=1)
         LineItem.objects.create(
             estimate=self.estimate_a,
             material=self.material,
+            load_type=load_type,
             material_group=group,
             role='Sheathing',
             quantity=12,
@@ -193,11 +195,53 @@ class EstimateMaterialSummaryViewTests(TestCase):
         )
         self.client.force_login(self.user_a)
         response = self.client.get(reverse('estimating:estimate-material-summary', args=[self.estimate_a.pk]))
-        self.assertContains(response, 'Group: Wall Sheathing')
+        self.assertContains(response, 'First Floor System')
+        self.assertContains(response, 'Wall Sheathing')
         self.assertContains(
             response,
             reverse('estimating:estimate-material-group-waste', args=[self.estimate_a.pk, group.pk]),
         )
+
+    def test_summary_repairs_legacy_formula_ft_rows(self):
+        MaterialLength.objects.create(product=self.material, length_ft=Decimal('16'), is_default=True)
+        formula = Formula.objects.get(name='Line LF', account__isnull=True)
+        assembly = Assembly.objects.create(account=self.user_a.account, name='Legacy sill', tool_type='line')
+        rule = CalculationRule.objects.create(
+            assembly=assembly,
+            material=self.material,
+            role='Sill Plate',
+            formula=formula,
+        )
+        page = make_plan_page(self.project_a, label='Legacy Summary Page')
+        page.scale_pixels_per_foot = Decimal('10')
+        page.save(update_fields=['scale_pixels_per_foot'])
+        trace = Trace.objects.create(
+            plan_page=page,
+            tool_type=Trace.ToolType.LINE,
+            geometry=[{'x': 0, 'y': 0}, {'x': 120, 'y': 0}],
+            assembly=assembly,
+            settings={},
+        )
+        LineItem.objects.create(
+            estimate=self.estimate_a,
+            trace=trace,
+            calculation_rule=rule,
+            material=self.material,
+            role='Sill Plate',
+            quantity=12,
+            length_ft=None,
+            source=LineItem.Source.TOOL,
+        )
+
+        self.client.force_login(self.user_a)
+        response = self.client.get(reverse('estimating:estimate-material-summary', args=[self.estimate_a.pk]))
+
+        repaired = LineItem.objects.get(trace=trace, calculation_rule=rule)
+        self.assertEqual(repaired.quantity, 1)
+        self.assertEqual(repaired.length_ft, Decimal('16'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Material Summary Stud')
+        self.assertContains(response, '16 ft')
 
 
 class EstimateMaterialGroupWasteUpdateViewTests(TestCase):

@@ -24,11 +24,11 @@ class PlanPageAdmin(admin.ModelAdmin):
 
 @admin.register(Trace)
 class TraceAdmin(admin.ModelAdmin):
-    list_display = ('__str__', 'tool_type', 'material', 'created_at')
-    list_filter = ('tool_type', 'material')
+    list_display = ('__str__', 'tool_type', 'material', 'load_type', 'created_at')
+    list_filter = ('tool_type', 'material', 'load_type')
 
 
 @admin.register(ToolPreset)
 class ToolPresetAdmin(admin.ModelAdmin):
-    list_display = ('name', 'account', 'tool_type', 'material', 'assembly', 'is_favorite')
+    list_display = ('name', 'account', 'tool_type', 'material', 'load_type', 'assembly', 'is_favorite')
     list_filter = ('tool_type', 'account', 'is_favorite')

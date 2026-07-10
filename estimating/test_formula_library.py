@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from accounts.models import Account
-from catalog.models import MaterialProduct
+from catalog.models import MaterialLength, MaterialProduct
 
 from .calculations import evaluate_rule
 from .models import Assembly, CalculationRule, Formula
@@ -32,11 +32,28 @@ class FormulaEvaluationTests(TestCase):
             formula=formula,
         )
 
-        quantity, length = evaluate_rule(rule, {'length_ft': Decimal('12.5')}, {})
+        quantity, length, _ = evaluate_rule(rule, {'length_ft': Decimal('12.5')}, {})
 
         self.assertEqual(quantity, 38)
         self.assertIsNone(length)
         self.assertEqual(formula.expression, 'Line LF × 3')
+
+    def test_line_formula_on_ft_material_returns_stock_pieces(self):
+        formula = Formula.objects.get(name='Line LF', account__isnull=True)
+        material = MaterialProduct.objects.create(name='Formula plate stock', input_type=MaterialProduct.InputType.FT)
+        MaterialLength.objects.create(product=material, length_ft=16, is_default=True)
+        assembly = Assembly.objects.create(name='Legacy stock assembly', tool_type='line')
+        rule = CalculationRule.objects.create(
+            assembly=assembly,
+            material=material,
+            role='Plate',
+            formula=formula,
+        )
+
+        quantity, length, _ = evaluate_rule(rule, {'length_ft': Decimal('20')}, {})
+
+        self.assertEqual(quantity, 2)
+        self.assertEqual(length, Decimal('16'))
 
 
 class FormulaLibraryViewTests(TestCase):
@@ -132,9 +149,6 @@ class FormulaLibraryViewTests(TestCase):
         self.assertEqual(assembly.rules.get().formula, formula)
 
     def test_assembly_creation_rejects_both_formula_and_formula_kind(self):
-        # Server-side backstop for CalculationRule.clean()'s XOR rule - the
-        # form JS enforces this live, but a request without JS (or a bug in
-        # it) must still be rejected rather than silently saving an ambiguous rule.
         material = MaterialProduct.objects.create(name='Ambiguous rule material')
         formula = Formula.objects.get(name='Line LF', account__isnull=True)
 

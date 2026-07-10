@@ -31,21 +31,41 @@ def _spacing_in(settings, default=16):
     return Decimal(str(settings.get('spacing_in') or settings.get('stud_spacing_in') or default))
 
 
-def _stock_length_or_none(material, required_ft):
-    """Smallest stock length covering `required_ft` for FT materials; None for
-    each/box materials (e.g. trusses ordered per unit)."""
+def _resolve_stock_length(rule, required_ft):
+    """The MaterialLength row to use for `required_ft` on this rule, or None
+    for each/box materials (e.g. trusses ordered per unit). Honors the rule's
+    `preferred_length` pin unconditionally when set - no "does it cover the
+    required length" guardrail, since a pin is an explicit, deliberate
+    override. Otherwise falls back to the smallest stock length that covers
+    `required_ft`."""
+    material = rule.material
     if not material.supports_input_type(MaterialProduct.InputType.FT):
         return None
-    return material.stock_length_for(required_ft)
+    if rule.preferred_length_id:
+        return rule.preferred_length
+    return material.stock_length_row_for(required_ft)
 
 
-def _spliced_pieces(material, required_ft):
-    """(piece_count, piece_length_or_None) to build one member of `required_ft`,
-    splicing from stock when it is longer than the longest stock piece. For
-    each/box materials there are no stock lengths, so it is always one unit."""
+def _resolve_spliced_pieces(rule, required_ft):
+    """(piece_count, MaterialLength_row_or_None) to build one member of
+    `required_ft`, splicing from stock when it is longer than a single stock
+    piece. For each/box materials there are no stock lengths, so it is always
+    one unit. Honors the rule's `preferred_length` pin as the splice unit in
+    place of the material's longest stock length."""
+    material = rule.material
     if not material.supports_input_type(MaterialProduct.InputType.FT):
         return 1, None
-    return material.pieces_for_length(required_ft)
+    if rule.preferred_length_id:
+        unit = rule.preferred_length
+        required = Decimal(str(required_ft))
+        if required <= unit.length_ft:
+            return 1, unit
+        return math.ceil(required / unit.length_ft), unit
+    max_len = material.max_length_row
+    required = Decimal(str(required_ft))
+    if required <= max_len.length_ft:
+        return 1, material.stock_length_row_for(required)
+    return math.ceil(required / max_len.length_ft), max_len
 
 
 def _primary_measurement_value(measurement):
@@ -90,10 +110,19 @@ def _attached_opening_width_ft(trace):
 
 def evaluate_rule(rule, measurement, settings, opening_deduction_ft=Decimal('0'), junctions=None):
     """Dispatch a CalculationRule's formula_kind against a measurement and the
-    Trace's settings snapshot. Returns (raw_quantity, piece_length_ft_or_None).
+    Trace's settings snapshot. Returns
+    (raw_quantity, piece_length_ft_or_None, stock_length_row_or_None).
     Pure - no DB writes."""
     if rule.formula_id:
-        return max(0, math.ceil(rule.formula.evaluate(measurement))), None
+        evaluated = rule.formula.evaluate(measurement)
+        measurement_kind = rule.formula.measurement_kind
+        if (
+            measurement_kind in (rule.formula.MeasurementKind.LINE_LF, rule.formula.MeasurementKind.PERIMETER_LF)
+            and rule.material.supports_input_type(MaterialProduct.InputType.FT)
+        ):
+            length_row = rule.preferred_length or rule.material.default_length_row
+            return max(0, math.ceil(evaluated / length_row.length_ft)), length_row.length_ft, length_row
+        return max(0, math.ceil(evaluated)), None, None
 
     kind = rule.formula_kind
 
@@ -112,60 +141,67 @@ def evaluate_rule(rule, measurement, settings, opening_deduction_ft=Decimal('0')
         # own length (92.625" there). Matches plans.framing's elevation preview
         # exactly, so the two never disagree about what a wall's studs are cut to.
         wall_height_in = settings.get('wall_height_in')
-        piece_length = None
+        piece_row = None
         if wall_height_in:
             stud_length_ft = (Decimal(str(wall_height_in)) - STANDARD_PLATE_ALLOWANCE_IN) / 12
             if stud_length_ft > 0:
-                piece_length = _stock_length_or_none(rule.material, stud_length_ft)
-        return count, piece_length
+                piece_row = _resolve_stock_length(rule, stud_length_ft)
+        return count, (piece_row.length_ft if piece_row else None), piece_row
 
     if kind == Kind.PER_STOCK_LENGTH:
         # Lines measure a run directly; areas contribute their perimeter
-        # (e.g. rim board around a floor deck).
+        # (e.g. rim board around a floor deck). Multiply the required run
+        # footage first, then divide by stock length once - a double top
+        # plate on a 20 ft wall is 40 LF total, which needs 3 sixteen-foot
+        # pieces, not ceil(20/16) * 2 = 4.
         run_ft = measurement.get('length_ft', measurement.get('perimeter_ft'))
-        default_length = rule.material.default_length_ft
-        return math.ceil(run_ft / default_length) * rule.multiplier, default_length
+        length_row = rule.preferred_length or rule.material.default_length_row
+        required_ft = run_ft * rule.multiplier
+        return math.ceil(required_ft / length_row.length_ft), length_row.length_ft, length_row
 
     if kind == Kind.PER_LENGTH:
         length_ft = measurement['length_ft']
-        return rule.multiplier, _stock_length_or_none(rule.material, length_ft)
+        row = _resolve_stock_length(rule, length_ft)
+        return rule.multiplier, (row.length_ft if row else None), row
 
     if kind == Kind.PER_LENGTH_SPLICED:
         length_ft = measurement['length_ft']
-        pieces, piece_length = _spliced_pieces(rule.material, length_ft)
-        return rule.multiplier * pieces, piece_length
+        pieces, row = _resolve_spliced_pieces(rule, length_ft)
+        return rule.multiplier * pieces, (row.length_ft if row else None), row
 
     if kind == Kind.PER_AREA_SPACING:
         run_ft, member_length_ft = _area_members(measurement, settings)
         count = (math.ceil((run_ft * 12) / _spacing_in(settings)) + 1 + rule.extra) * rule.multiplier
-        return count, _stock_length_or_none(rule.material, member_length_ft)
+        row = _resolve_stock_length(rule, member_length_ft)
+        return count, (row.length_ft if row else None), row
 
     if kind == Kind.PER_AREA_SPACING_SPLICED:
         run_ft, member_length_ft = _area_members(measurement, settings)
         member_count = (math.ceil((run_ft * 12) / _spacing_in(settings)) + 1 + rule.extra) * rule.multiplier
-        pieces, piece_length = _spliced_pieces(rule.material, member_length_ft)
-        return member_count * pieces, piece_length
+        pieces, row = _resolve_spliced_pieces(rule, member_length_ft)
+        return member_count * pieces, (row.length_ft if row else None), row
 
     if kind == Kind.PER_AREA_COVERAGE:
         if not rule.coverage_sqft:
             raise ValueError(f'{rule} needs coverage_sqft for per_area_coverage.')
-        return math.ceil(measurement['area_sqft'] / rule.coverage_sqft) * rule.multiplier, None
+        return math.ceil(measurement['area_sqft'] / rule.coverage_sqft) * rule.multiplier, None, None
 
     if kind == Kind.PER_COUNT:
-        return measurement['count'] * rule.multiplier + rule.extra, None
+        return measurement['count'] * rule.multiplier + rule.extra, None, None
 
     if kind == Kind.HEADER:
         width_ft = measurement['length_ft'] + HEADER_BEARING_FT
-        return rule.multiplier, _stock_length_or_none(rule.material, width_ft)
+        row = _resolve_stock_length(rule, width_ft)
+        return rule.multiplier, (row.length_ft if row else None), row
 
     if kind == Kind.FIXED_COUNT:
-        return rule.multiplier + rule.extra, None
+        return rule.multiplier + rule.extra, None, None
 
     if kind == Kind.PER_BOX:
         if not rule.units_per_measurement:
             raise ValueError(f'{rule} needs units_per_measurement for per_box.')
         total_units = _primary_measurement_value(measurement) * rule.units_per_measurement
-        return rule.material.boxes_needed(total_units) * rule.multiplier, None
+        return rule.material.boxes_needed(total_units) * rule.multiplier, None, None
 
     raise ValueError(f'Unknown formula_kind: {kind}')
 
@@ -175,7 +211,7 @@ def calculate_raw_quantity(rule, measurement, settings, opening_deduction_ft=Dec
     Accepts either a measurement dict or a bare length in feet."""
     if not isinstance(measurement, dict):
         measurement = {'length_ft': Decimal(str(measurement))}
-    quantity, _ = evaluate_rule(rule, measurement, settings, opening_deduction_ft, junctions)
+    quantity, _, _ = evaluate_rule(rule, measurement, settings, opening_deduction_ft, junctions)
     return quantity
 
 
@@ -218,15 +254,18 @@ def generate_line_items(estimate, assembly, measurement, settings=None, trace=No
 
     created = []
     for rule in assembly.rules.select_related(
-        'material', 'material_group', 'formula', 'formula__base_formula',
+        'material', 'material_group', 'formula', 'formula__base_formula', 'preferred_length',
     ).order_by('order'):
-        raw_quantity, piece_length_ft = evaluate_rule(rule, measurement, settings, opening_deduction_ft, junctions)
+        raw_quantity, piece_length_ft, stock_length = evaluate_rule(
+            rule, measurement, settings, opening_deduction_ft, junctions,
+        )
         waste_factor = effective_waste_factor(rule, override_map)
         quantity = apply_waste(raw_quantity, waste_factor)
         created.append(LineItem.objects.create(
             estimate=estimate, trace=trace, calculation_rule=rule, material=rule.material,
             material_group=rule.material_group, role=rule.role, category=assembly.category,
-            length_ft=piece_length_ft, quantity=quantity, waste_factor=waste_factor,
+            load_type=getattr(trace, 'load_type', None),
+            stock_length=stock_length, length_ft=piece_length_ft, quantity=quantity, waste_factor=waste_factor,
             source=LineItem.Source.TOOL,
         ))
     return created

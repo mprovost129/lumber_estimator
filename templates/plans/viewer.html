@@ -215,6 +215,7 @@
      data-material-summary-url="{% url 'estimating:estimate-material-summary' estimate.pk %}"
      data-default-stud-spacing="{{ default_stud_spacing_in }}"
      data-default-wall-height="{{ default_wall_height_in }}"
+     data-keep-tool-active-after-draw="{{ keep_tool_active_after_draw|yesno:'true,false' }}"
      data-is-calibrated="{{ is_calibrated|yesno:'true,false' }}">
 
     <div id="canvas-column">
@@ -372,6 +373,11 @@
                 </select>
             </div>
             <div class="mb-2">
+                <label for="load-type-select" class="form-label">Load type</label>
+                <select id="load-type-select" class="form-select"></select>
+                <p class="text-muted small mb-0">Sets which system this trace feeds in the material list.</p>
+            </div>
+            <div class="mb-2">
                 <label for="assembly-select" class="form-label">Assembly</label>
                 <select id="assembly-select" class="form-select"></select>
                 <p class="text-muted small mb-0">Computes a material list from the trace's measurement.</p>
@@ -487,6 +493,10 @@
                 </select>
             </div>
             <div class="mb-2">
+                <label for="inspector-load-type-select" class="form-label">Load type</label>
+                <select id="inspector-load-type-select" class="form-select"></select>
+            </div>
+            <div class="mb-2">
                 <label for="inspector-assembly-select" class="form-label">Assembly</label>
                 <select id="inspector-assembly-select" class="form-select"></select>
             </div>
@@ -521,6 +531,13 @@
                 <select id="bulk-material-select" class="form-select">
                     {% include 'plans/_material_options.html' %}
                 </select>
+            </div>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="bulk-load-type-toggle">
+                <label class="form-check-label" for="bulk-load-type-toggle">Apply load type</label>
+            </div>
+            <div class="mb-2">
+                <select id="bulk-load-type-select" class="form-select"></select>
             </div>
             <div id="bulk-assembly-wrap">
                 <div class="form-check form-switch mb-2">
@@ -635,6 +652,7 @@
 
 {{ traces|json_script:"traces-data" }}
 {{ materials_data|json_script:"materials-data" }}
+{{ load_types_data|json_script:"load-types-data" }}
 {{ assemblies_data|json_script:"assemblies-data" }}
 {{ presets_data|json_script:"presets-data" }}
 {{ walls_data|json_script:"walls-data" }}

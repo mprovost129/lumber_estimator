@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block title %}User Settings{% endblock %}
+{% block meta_description %}Manage your user settings.{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1 class="page-title">User Settings</h1>
+        <p class="page-subtitle">Personal preferences that follow your login.</p>
+    </div>
+</div>
+
+<div class="card p-4" style="max-width: 760px;">
+    <form method="post">
+        {% csrf_token %}
+        <h2 class="h5 mb-3">Plan Viewer</h2>
+        <div class="form-check mb-2">
+            {{ form.keep_tool_active_after_draw }}
+            <label class="form-check-label" for="{{ form.keep_tool_active_after_draw.id_for_label }}">
+                {{ form.keep_tool_active_after_draw.label }}
+            </label>
+        </div>
+        <p class="text-muted small mb-4">On keeps walls, plates, and other drawing tools armed until you press Escape. Off returns to the inspector after each trace.</p>
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </form>
+</div>
+{% endblock %}

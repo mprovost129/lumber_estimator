@@ -20,6 +20,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         help_text='When the user confirmed this address via the emailed link. '
                   'Signing in never requires it; Stripe checkout does.',
     )
+    keep_tool_active_after_draw = models.BooleanField(
+        default=True,
+        help_text='When enabled, the plan viewer keeps the current drawing tool armed until Escape is pressed.',
+    )
 
     objects = UserManager()
 
